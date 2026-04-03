@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>ダーツ豆知識クイズ</title>
+  <link rel="stylesheet" href="../style.css">
+  <style>
+    .quiz-container { display: flex; flex-direction: column; min-height: calc(100dvh - 60px); padding: 16px; }
+    .quiz-top { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .quiz-progress { flex: 1; }
+    .question-card { background: var(--surface); border-radius: var(--radius-lg); padding: 24px 20px; margin-bottom: 20px; min-height: 120px; display: flex; align-items: center; justify-content: center; }
+    .question-text { font-size: 20px; font-weight: 700; text-align: center; line-height: 1.5; }
+    .quiz-num { font-size: 13px; color: var(--text-muted); text-align: center; margin-bottom: 12px; }
+    .trivia-slide { animation: slide-up 0.3s ease; margin-top: 16px; }
+    .circle-timer { width: 52px; height: 52px; position: relative; flex-shrink: 0; }
+    .circle-timer svg { transform: rotate(-90deg); }
+    .circle-timer-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; }
+    .result-container { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80dvh; gap: 24px; text-align: center; padding: 20px; }
+    .result-big { font-size: 72px; font-weight: 800; background: linear-gradient(135deg, var(--theme-color), #fff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .start-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80dvh; gap: 24px; text-align: center; padding: 20px; }
+  </style>
+</head>
+<body>
+  <script src="../store/config.js"></script>
+  <script src="../store/sounds.js"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+  <div id="app">
+    <div class="game-header">
+      <a href="../index.html" class="back-btn">←</a>
+      <h1>ダーツ豆知識クイズ</h1>
+    </div>
+
+    <!-- Start -->
+    <div v-if="phase === 'start'" class="start-screen">
+      <div style="font-size:64px;">❓</div>
+      <div style="font-size:24px; font-weight:800;">ダーツ豆知識クイズ</div>
+      <div class="text-muted">全{{ questions.length }}問からランダム10問出題</div>
+      <button class="btn btn-primary btn-lg" @click="startQuiz" style="max-width:280px;">スタート！</button>
+    </div>
+
+    <!-- Quiz -->
+    <div v-if="phase === 'playing'" class="quiz-container">
+      <div class="quiz-top">
+        <div class="quiz-progress" style="flex:1;">
+          <div class="progress-bar"><div class="progress-bar-fill" :style="{ width: ((currentIndex + 1) / sessionQuestions.length * 100) + '%' }"></div></div>
+        </div>
+        <div class="circle-timer">
+          <svg viewBox="0 0 52 52" width="52" height="52">
+            <circle cx="26" cy="26" r="22" fill="none" stroke="var(--surface2)" stroke-width="4"/>
+            <circle cx="26" cy="26" r="22" fill="none" :stroke="timeLeft <= 5 ? 'var(--wrong)' : 'var(--theme-color)'" stroke-width="4" stroke-linecap="round"
+              :stroke-dasharray="138.2" :stroke-dashoffset="138.2 - (timeLeft / 15) * 138.2"/>
+          </svg>
+          <div class="circle-timer-text" :style="{ color: timeLeft <= 5 ? 'var(--wrong)' : 'var(--text)' }">{{ timeLeft }}</div>
+        </div>
+      </div>
+
+      <div class="quiz-num">第 {{ currentIndex + 1 }} 問 / {{ sessionQuestions.length }}</div>
+
+      <div class="question-card">
+        <div class="question-text">{{ currentQuestion.q }}</div>
+      </div>
+
+      <div class="choice-grid">
+        <button v-for="(c, i) in currentQuestion.choices" :key="i"
+          class="choice-btn"
+          :class="{ 'correct-answer': answered && i === currentQuestion.answer, 'wrong-answer': answered && i !== currentQuestion.answer }"
+          :disabled="answered"
+          @click="selectAnswer(i)">
+          {{ c }}
+        </button>
+      </div>
+
+      <div v-if="answered" class="trivia-slide">
+        <div class="trivia-card">{{ currentQuestion.trivia }}</div>
+        <button class="btn btn-primary mt-16" @click="nextQuestion">
+          {{ currentIndex < sessionQuestions.length - 1 ? '次の問題' : '結果を見る' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Result -->
+    <div v-if="phase === 'result'" class="result-container">
+      <div style="font-size:48px;">{{ correctCount === sessionQuestions.length ? '🏆' : correctCount >= 7 ? '🎉' : '📊' }}</div>
+      <div class="result-big">{{ correctCount }}/{{ sessionQuestions.length }}</div>
+      <div style="font-size:18px; font-weight:600;">
+        {{ correctCount === sessionQuestions.length ? 'パーフェクト！ダーツマスター！' : correctCount >= 7 ? 'すごい！かなり詳しい！' : correctCount >= 4 ? 'まあまあ！もっと勉強しよう！' : '頑張ろう！ダーツの世界は奥深い！' }}
+      </div>
+      <div class="result-stats" style="max-width:300px;">
+        <div class="result-stat">
+          <div class="result-stat-value" style="color:var(--correct);">{{ correctCount }}</div>
+          <div class="result-stat-label">正解</div>
+        </div>
+        <div class="result-stat">
+          <div class="result-stat-value" style="color:var(--wrong);">{{ sessionQuestions.length - correctCount }}</div>
+          <div class="result-stat-label">不正解</div>
+        </div>
+        <div class="result-stat">
+          <div class="result-stat-value">{{ Math.round(correctCount / sessionQuestions.length * 100) }}%</div>
+          <div class="result-stat-label">正答率</div>
+        </div>
+      </div>
+      <button class="btn btn-primary" @click="startQuiz" style="max-width:280px;">もう一度プレイ</button>
+      <a href="../index.html" class="btn btn-secondary" style="max-width:280px;">ゲーム一覧に戻る</a>
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, computed, onUnmounted } = Vue;
+
+    createApp({
+      setup() {
+        const questions = [
+          { q: "ソフトダーツのインナーブルは何点？", choices: ["25点", "50点", "40点", "100点"], answer: 1, trivia: "インナーブル50点、アウターブル25点。スティールでは全てのブルが50点。" },
+          { q: "ダーツボードの最高得点エリアは？", choices: ["ブル", "トリプル20", "ダブル20", "トリプルブル"], answer: 1, trivia: "トリプル20は60点で、ブル（50点）よりも高得点。" },
+          { q: "ダーツの的までの距離（ソフト）は？", choices: ["200cm", "244cm", "260cm", "237cm"], answer: 1, trivia: "ソフトダーツは244cm、スティールダーツは237cm。" },
+          { q: "「ハットトリック」とは？", choices: ["3投連続ブル", "3投連続トリプル", "3ラウンド連続100点超え", "3本同じ場所"], answer: 0, trivia: "1ラウンドで3投全てブルに入れることをハットトリックと呼ぶ。" },
+          { q: "01ゲームで最後に上がるために必要なのは？", choices: ["シングル", "ダブル", "トリプル", "ブル"], answer: 1, trivia: "01ゲームではダブルアウトが基本ルール。ちょうど0にするためにダブルで上がる。" },
+          { q: "1ラウンドの最高得点は何点？", choices: ["150点", "160点", "170点", "180点"], answer: 3, trivia: "T20×3 = 180点。これを「トン80」と呼ぶ。" },
+          { q: "ブルの高さは床から何cm？", choices: ["170cm", "173cm", "175cm", "180cm"], answer: 1, trivia: "ダーツボードのブルの中心は床から173cmの高さに設置する。" },
+          { q: "「トン」とは1ラウンドで何点以上？", choices: ["80点", "90点", "100点", "120点"], answer: 2, trivia: "1ラウンド100点以上をトン、150点以上をトン50、180点をトン80と呼ぶ。" },
+          { q: "クリケットで使う数字はどれ？", choices: ["15〜20とブル", "10〜20", "1〜20", "16〜20とブル"], answer: 0, trivia: "クリケットでは15,16,17,18,19,20とブルを使ってゲームを進める。" },
+          { q: "ダーツの「アレンジ」とは？", choices: ["投げるフォーム", "残り点数からの上がり方", "ダーツの持ち方", "立ち位置"], answer: 1, trivia: "残り点数をどのように0にするかの計画をアレンジと呼ぶ。" },
+          { q: "「シャンハイ」とは？", choices: ["同じ番号のS・D・T全て", "3連続ブル", "1〜20を順番に打つ", "3投全て同じ場所"], answer: 0, trivia: "同じ番号のシングル・ダブル・トリプルを1ラウンドで全て打つこと。" },
+          { q: "9ダーツフィニッシュとは？", choices: ["9ラウンドで終わる", "501を9投で上がる", "9本ダーツを使う", "9点で上がる"], answer: 1, trivia: "501を最少の9投で上がること。テレビ中継で達成されると大歓声が起きる。" },
+          { q: "ダーツボードの配列を考案したのは？", choices: ["ジョン・ロウ", "フィル・テイラー", "ブライアン・ギャムリン", "エリック・ブリストウ"], answer: 2, trivia: "1896年にブライアン・ギャムリンが考案。高い数字の隣に低い数字を配置。" },
+          { q: "ダブル20は何点？", choices: ["20点", "30点", "40点", "60点"], answer: 2, trivia: "ダブルは×2なので、ダブル20=40点。ダブルリングはボードの一番外側。" },
+          { q: "トリプル19は何点？", choices: ["38点", "47点", "57点", "76点"], answer: 2, trivia: "トリプルは×3なので、トリプル19=57点。" },
+          { q: "ソフトとスティール、的が大きいのは？", choices: ["ソフト", "スティール", "同じ", "大会による"], answer: 0, trivia: "ソフトダーツの的（15.5インチ）はスティール（13.2インチ）より大きい。" },
+          { q: "ダーツの「レッグ」とは？", choices: ["足の位置", "セットのゲーム数", "1ゲームのこと", "投げ方の種類"], answer: 2, trivia: "1回の01ゲーム（例:501）を1レッグと数える。" },
+          { q: "「ロートン」とは？", choices: ["80〜99点", "100〜149点", "60〜79点", "50〜99点"], answer: 1, trivia: "100〜149点をロートン。150〜179をハイトン。180はトン80。" },
+          { q: "フィル・テイラーの世界選手権優勝回数は？", choices: ["10回", "12回", "14回", "16回"], answer: 3, trivia: "フィル・テイラーは世界選手権を16回制覇した伝説のプレイヤー。" },
+          { q: "ダーツが公式にスポーツ認定された年は？", choices: ["2000年", "2003年", "2005年", "2010年"], answer: 2, trivia: "2005年にSport Englandがダーツをスポーツとして公式認定。" },
+        ];
+
+        const phase = ref('start');
+        const sessionQuestions = ref([]);
+        const currentIndex = ref(0);
+        const answered = ref(false);
+        const correctCount = ref(0);
+        const timeLeft = ref(15);
+        let timerInterval = null;
+
+        const currentQuestion = computed(() => sessionQuestions.value[currentIndex.value] || questions[0]);
+
+        function shuffle(arr) {
+          const a = [...arr];
+          for (let i = a.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [a[i], a[j]] = [a[j], a[i]];
+          }
+          return a;
+        }
+
+        function startQuiz() {
+          sessionQuestions.value = shuffle(questions).slice(0, 10);
+          currentIndex.value = 0;
+          correctCount.value = 0;
+          answered.value = false;
+          phase.value = 'playing';
+          startTimer();
+          SoundEngine.tap();
+        }
+
+        function startTimer() {
+          clearInterval(timerInterval);
+          timeLeft.value = 15;
+          timerInterval = setInterval(() => {
+            timeLeft.value--;
+            if (timeLeft.value === 5) SoundEngine.countdown();
+            if (timeLeft.value <= 0) {
+              clearInterval(timerInterval);
+              answered.value = true;
+              SoundEngine.wrong();
+            }
+          }, 1000);
+        }
+
+        function selectAnswer(i) {
+          if (answered.value) return;
+          answered.value = true;
+          clearInterval(timerInterval);
+          if (i === currentQuestion.value.answer) {
+            correctCount.value++;
+            SoundEngine.correct();
+          } else {
+            SoundEngine.wrong();
+          }
+          SoundEngine.tap();
+        }
+
+        function nextQuestion() {
+          if (currentIndex.value < sessionQuestions.value.length - 1) {
+            currentIndex.value++;
+            answered.value = false;
+            startTimer();
+          } else {
+            phase.value = 'result';
+            clearInterval(timerInterval);
+            if (correctCount.value === sessionQuestions.value.length) {
+              SoundEngine.fanfare();
+            } else {
+              SoundEngine.result();
+            }
+          }
+        }
+
+        onUnmounted(() => clearInterval(timerInterval));
+
+        document.documentElement.style.setProperty('--theme-color', STORE_CONFIG.color);
+
+        return { questions, phase, sessionQuestions, currentIndex, currentQuestion, answered, correctCount, timeLeft, startQuiz, selectAnswer, nextQuestion, SoundEngine };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

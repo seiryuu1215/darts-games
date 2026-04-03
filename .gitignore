@@ -1,0 +1,7 @@
+.DS_Store
+.vercel
+node_modules/
+*.log
+sounds/*.mp3
+sounds/*.wav
+sounds/*.ogg

@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>ボード配置クイズ</title>
+  <link rel="stylesheet" href="../style.css">
+  <style>
+    .bq-container { display: flex; flex-direction: column; min-height: calc(100dvh - 60px); padding: 16px; }
+    .bq-question { font-size: 22px; font-weight: 800; text-align: center; margin-bottom: 4px; line-height: 1.4; }
+    .bq-progress { font-size: 13px; color: var(--text-muted); text-align: center; margin-bottom: 12px; }
+    .board-mini { width: 240px; height: 240px; margin: 0 auto 16px; }
+    .board-mini svg { width: 100%; height: 100%; }
+    .explanation-card { animation: slide-up 0.3s ease; background: var(--surface); border-radius: var(--radius); padding: 16px; margin-top: 12px; }
+    .start-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80dvh; gap: 20px; padding: 20px; text-align: center; }
+  </style>
+</head>
+<body>
+  <script src="../store/config.js"></script>
+  <script src="../store/sounds.js"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+  <div id="app">
+    <div class="game-header">
+      <a href="../index.html" class="back-btn">←</a>
+      <h1>ボード配置クイズ</h1>
+    </div>
+
+    <!-- Start -->
+    <div v-if="phase === 'start'" class="start-screen">
+      <div style="font-size:64px;">🔢</div>
+      <div style="font-size:24px; font-weight:800;">ボード配置クイズ</div>
+      <div class="text-muted">ダーツボードの数字配置を覚えよう</div>
+      <svg viewBox="0 0 240 240" width="180" height="180">
+        <circle cx="120" cy="120" r="110" fill="#1a1a1a" stroke="#333" stroke-width="2"/>
+        <g v-for="(num, i) in boardOrder" :key="i">
+          <path :d="miniSegPath(i, 70, 110)" :fill="i % 2 === 0 ? '#2e2e2e' : '#1a1a1a'" stroke="#444" stroke-width="0.5"/>
+          <text :x="segTextPos(i, 92).x" :y="segTextPos(i, 92).y" text-anchor="middle" dominant-baseline="middle" fill="#aaa" font-size="11" font-weight="600">{{ num }}</text>
+        </g>
+        <circle cx="120" cy="120" r="24" fill="#0d4a0d" stroke="#1a6a1a" stroke-width="1"/>
+        <circle cx="120" cy="120" r="10" fill="#c0392b" stroke="#e74c3c" stroke-width="1"/>
+      </svg>
+      <button class="btn btn-primary btn-lg" @click="startGame" style="max-width:280px;">スタート！</button>
+    </div>
+
+    <!-- Quiz -->
+    <div v-if="phase === 'playing'" class="bq-container">
+      <div class="progress-bar" style="margin-bottom:12px;">
+        <div class="progress-bar-fill" :style="{ width: ((currentIndex + 1) / sessionQuestions.length * 100) + '%' }"></div>
+      </div>
+      <div class="bq-progress">{{ currentIndex + 1 }} / {{ sessionQuestions.length }}</div>
+      <div class="bq-question">{{ currentQ.q }}</div>
+
+      <div class="board-mini">
+        <svg viewBox="0 0 240 240">
+          <circle cx="120" cy="120" r="110" fill="#1a1a1a" stroke="#333" stroke-width="2"/>
+          <g v-for="(num, i) in boardOrder" :key="i">
+            <path :d="miniSegPath(i, 70, 110)"
+              :fill="getSegColor(num, i)" stroke="#444" stroke-width="0.5"/>
+            <text :x="segTextPos(i, 92).x" :y="segTextPos(i, 92).y"
+              text-anchor="middle" dominant-baseline="middle"
+              :fill="getSegTextColor(num)" font-size="11" font-weight="700">
+              {{ getSegLabel(num) }}
+            </text>
+          </g>
+          <circle cx="120" cy="120" r="24" fill="#0d4a0d" stroke="#1a6a1a" stroke-width="1"/>
+          <circle cx="120" cy="120" r="10" fill="#c0392b" stroke="#e74c3c" stroke-width="1"/>
+        </svg>
+      </div>
+
+      <div class="choice-grid">
+        <button v-for="(c, i) in currentQ.choices" :key="i"
+          class="choice-btn"
+          :class="{ 'correct-answer': answered && c === currentQ.answer, 'wrong-answer': answered && c !== currentQ.answer }"
+          :disabled="answered"
+          @click="selectAnswer(c)">
+          {{ c }}
+        </button>
+      </div>
+
+      <div v-if="answered" class="explanation-card">
+        <div style="color:var(--correct); font-weight:700; margin-bottom:4px;">正解: {{ currentQ.answer }}</div>
+        <div v-if="currentQ.explanation" class="text-sm text-muted">{{ currentQ.explanation }}</div>
+        <button class="btn btn-primary mt-16" @click="nextQuestion">
+          {{ currentIndex < sessionQuestions.length - 1 ? '次の問題' : '結果を見る' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Result -->
+    <div v-if="phase === 'result'" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:80dvh; gap:24px; text-align:center; padding:20px;">
+      <div style="font-size:48px;">{{ correctCount >= 9 ? '🏆' : correctCount >= 6 ? '🎉' : '📊' }}</div>
+      <div style="font-size:72px; font-weight:800; background:linear-gradient(135deg, var(--theme-color), #fff); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;">
+        {{ correctCount }}/{{ sessionQuestions.length }}
+      </div>
+      <div style="font-size:18px; font-weight:600;">
+        {{ correctCount >= 9 ? 'ボードマスター！' : correctCount >= 6 ? 'いい感じ！' : 'もっと練習しよう！' }}
+      </div>
+      <div class="result-stats" style="max-width:300px;">
+        <div class="result-stat">
+          <div class="result-stat-value" style="color:var(--correct);">{{ correctCount }}</div>
+          <div class="result-stat-label">正解</div>
+        </div>
+        <div class="result-stat">
+          <div class="result-stat-value" style="color:var(--wrong);">{{ sessionQuestions.length - correctCount }}</div>
+          <div class="result-stat-label">不正解</div>
+        </div>
+        <div class="result-stat">
+          <div class="result-stat-value">{{ Math.round(correctCount / sessionQuestions.length * 100) }}%</div>
+          <div class="result-stat-label">正答率</div>
+        </div>
+      </div>
+      <button class="btn btn-primary" @click="startGame" style="max-width:280px;">もう一度プレイ</button>
+      <a href="../index.html" class="btn btn-secondary" style="max-width:280px;">ゲーム一覧に戻る</a>
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, computed } = Vue;
+
+    createApp({
+      setup() {
+        const boardOrder = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5];
+        const segAngle = 360 / 20;
+
+        const QUESTIONS = [
+          { q: "「20」の右隣（時計回り）は？", target: 20, answer: 1, choices: [1, 5, 3, 18], explanation: "20の時計回りの隣は1。反時計回りは5。" },
+          { q: "「20」の左隣（反時計回り）は？", target: 20, answer: 5, choices: [1, 5, 18, 3], explanation: "20の反時計回りの隣は5。" },
+          { q: "「1」の右隣は？", target: 1, answer: 18, choices: [20, 18, 4, 5], explanation: "1の右隣は18。" },
+          { q: "「3」の向かい側は？", target: 3, answer: 17, choices: [17, 19, 2, 15], explanation: "ダーツボードでは3と17が向かい合っている。" },
+          { q: "「6」の右隣は？", target: 6, answer: 10, choices: [13, 10, 4, 15], explanation: "6の右隣は10。" },
+          { q: "「19」の左隣は？", target: 19, answer: 3, choices: [7, 3, 17, 16], explanation: "19の左隣（反時計回り）は3。" },
+          { q: "「11」の右隣は？", target: 11, answer: 14, choices: [8, 14, 16, 9], explanation: "11の右隣は14。" },
+          { q: "「7」の右隣は？", target: 7, answer: 16, choices: [19, 16, 8, 3], explanation: "7の右隣は16。" },
+          { q: "「15」の右隣は？", target: 15, answer: 2, choices: [10, 2, 17, 6], explanation: "15の右隣は2。" },
+          { q: "「9」の右隣は？", target: 9, answer: 12, choices: [14, 12, 11, 5], explanation: "9の右隣は12。" },
+          { q: "「18」の右隣は？", target: 18, answer: 4, choices: [1, 4, 13, 20], explanation: "18の右隣は4。" },
+          { q: "「16」の右隣は？", target: 16, answer: 8, choices: [7, 8, 11, 19], explanation: "16の右隣は8。" },
+          { q: "「4」の向かい側は？", target: 4, answer: 13, choices: [18, 6, 13, 1], explanation: "4と13は向かい合っている。" },
+          { q: "「12」の右隣は？", target: 12, answer: 5, choices: [9, 5, 20, 14], explanation: "12の右隣は5。そして5の右隣が20に戻る。" },
+          { q: "「17」の右隣は？", target: 17, answer: 3, choices: [2, 3, 19, 15], explanation: "17の右隣は3。" },
+          { q: "「2」の左隣は？", target: 2, answer: 15, choices: [17, 15, 10, 6], explanation: "2の左隣（反時計回り）は15。" },
+          { q: "「5」の右隣は？", target: 5, answer: 20, choices: [12, 20, 1, 9], explanation: "5の右隣は20。ボードの最上部に戻る。" },
+          { q: "「14」の左隣は？", target: 14, answer: 11, choices: [9, 11, 8, 16], explanation: "14の左隣は11。" },
+          { q: "トリプル20は何点？", target: 20, answer: 60, choices: [40, 60, 80, 100], explanation: "トリプルは×3。20×3=60点。" },
+          { q: "ダブル18は何点？", target: 18, answer: 36, choices: [18, 27, 36, 54], explanation: "ダブルは×2。18×2=36点。" },
+          { q: "「10」の向かい側は？", target: 10, answer: 15, choices: [6, 2, 15, 17], explanation: "10と15は向かい合っている。" },
+          { q: "「8」の左隣は？", target: 8, answer: 16, choices: [11, 14, 16, 7], explanation: "8の左隣（反時計回り）は16。" },
+        ];
+
+        const phase = ref('start');
+        const sessionQuestions = ref([]);
+        const currentIndex = ref(0);
+        const answered = ref(false);
+        const correctCount = ref(0);
+        const selectedAnswer = ref(null);
+
+        const currentQ = computed(() => sessionQuestions.value[currentIndex.value] || QUESTIONS[0]);
+
+        // SVG helpers
+        function polarToXY(cx, cy, r, angleDeg) {
+          const rad = (angleDeg - 90) * Math.PI / 180;
+          return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+        }
+
+        function miniSegPath(i, rInner, rOuter) {
+          const startAngle = i * segAngle;
+          const endAngle = startAngle + segAngle;
+          const p1 = polarToXY(120, 120, rOuter, startAngle);
+          const p2 = polarToXY(120, 120, rOuter, endAngle);
+          const p3 = polarToXY(120, 120, rInner, endAngle);
+          const p4 = polarToXY(120, 120, rInner, startAngle);
+          return `M${p1.x},${p1.y} A${rOuter},${rOuter} 0 0,1 ${p2.x},${p2.y} L${p3.x},${p3.y} A${rInner},${rInner} 0 0,0 ${p4.x},${p4.y} Z`;
+        }
+
+        function segTextPos(i, r) {
+          const angle = i * segAngle + segAngle / 2;
+          return polarToXY(120, 120, r, angle);
+        }
+
+        function getSegColor(num, i) {
+          if (!answered.value) {
+            if (num === currentQ.value.target) return STORE_CONFIG.color || '#378ADD';
+            if (currentQ.value.answer === num && typeof currentQ.value.answer === 'number' && currentQ.value.answer <= 20) return '#333';
+          } else {
+            if (num === currentQ.value.target) return STORE_CONFIG.color || '#378ADD';
+            if (num === currentQ.value.answer && currentQ.value.answer <= 20) return '#27ae60';
+          }
+          return i % 2 === 0 ? '#2e2e2e' : '#1a1a1a';
+        }
+
+        function getSegTextColor(num) {
+          if (num === currentQ.value.target) return '#fff';
+          if (answered.value && num === currentQ.value.answer && currentQ.value.answer <= 20) return '#fff';
+          return '#aaa';
+        }
+
+        function getSegLabel(num) {
+          if (!answered.value && num === currentQ.value.answer && currentQ.value.answer <= 20 && num !== currentQ.value.target) return '?';
+          return num;
+        }
+
+        function shuffle(arr) {
+          const a = [...arr];
+          for (let i = a.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [a[i], a[j]] = [a[j], a[i]];
+          }
+          return a;
+        }
+
+        function startGame() {
+          sessionQuestions.value = shuffle(QUESTIONS).slice(0, 10);
+          currentIndex.value = 0;
+          correctCount.value = 0;
+          answered.value = false;
+          selectedAnswer.value = null;
+          phase.value = 'playing';
+          SoundEngine.tap();
+        }
+
+        function selectAnswer(c) {
+          if (answered.value) return;
+          answered.value = true;
+          selectedAnswer.value = c;
+          if (c === currentQ.value.answer) {
+            correctCount.value++;
+            SoundEngine.correct();
+          } else {
+            SoundEngine.wrong();
+          }
+        }
+
+        function nextQuestion() {
+          if (currentIndex.value < sessionQuestions.value.length - 1) {
+            currentIndex.value++;
+            answered.value = false;
+            selectedAnswer.value = null;
+          } else {
+            SoundEngine.result();
+            phase.value = 'result';
+          }
+        }
+
+        document.documentElement.style.setProperty('--theme-color', STORE_CONFIG.color);
+
+        return {
+          boardOrder, phase, sessionQuestions, currentIndex, currentQ, answered,
+          correctCount, selectedAnswer,
+          miniSegPath, segTextPos, getSegColor, getSegTextColor, getSegLabel,
+          startGame, selectAnswer, nextQuestion, SoundEngine
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

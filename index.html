@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Darts Games</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .top-logo { max-width: 100px; max-height: 100px; border-radius: 16px; }
+    .store-name { font-size: 22px; font-weight: 800; letter-spacing: 2px; }
+    .games-list { display: flex; flex-direction: column; gap: 12px; padding: 0 16px 32px; }
+    .top-header { text-align: center; padding: 32px 16px 24px; }
+    .top-header p { color: var(--text-muted); font-size: 14px; margin-top: 8px; }
+    .sound-toggle { position: fixed; top: env(safe-area-inset-top, 12px); right: 12px; z-index: 50;
+      background: var(--surface2); border: none; color: var(--text); width: 40px; height: 40px;
+      border-radius: 50%; font-size: 20px; cursor: pointer; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <script src="store/config.js"></script>
+  <script src="store/sounds.js"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+  <div id="app">
+    <!-- パスワード画面 -->
+    <div v-if="!authenticated" class="password-screen" @click="unlockAudio">
+      <img v-if="config.logo" :src="config.logo" class="password-logo" alt="Logo">
+      <div v-else style="font-size:64px">🎯</div>
+      <div class="store-name" :style="{color: config.color}">{{ config.name }}</div>
+      <div class="password-input-group">
+        <div class="password-dots">
+          <div v-for="i in 4" :key="i" class="password-dot" :class="{ filled: password.length >= i }"></div>
+        </div>
+        <input
+          ref="pwInput"
+          type="tel"
+          class="input"
+          placeholder="パスワードを入力"
+          v-model="password"
+          @input="checkPassword"
+          maxlength="10"
+          style="text-align:center; font-size:24px; letter-spacing:8px;"
+          autocomplete="off"
+        >
+        <div v-if="pwError" style="color:var(--wrong); text-align:center; font-size:14px;" class="animate-shake">
+          パスワードが違います
+        </div>
+      </div>
+    </div>
+
+    <!-- メイン画面 -->
+    <div v-else>
+      <div class="top-header">
+        <img v-if="config.logo" :src="config.logo" class="top-logo" alt="Logo">
+        <div v-else style="font-size:48px; margin-bottom:8px">🎯</div>
+        <div class="store-name" :style="{color: config.color}">{{ config.name }}</div>
+        <p>ゲームを選んでプレイ！</p>
+      </div>
+
+      <button class="sound-toggle" @click="toggleSound">{{ soundOn ? '🔊' : '🔇' }}</button>
+
+      <div class="games-list">
+        <a v-for="game in games" :key="game.id" :href="game.url" class="game-card" @click="SoundEngine.tap()">
+          <div class="game-card-icon" :style="{ background: game.bg }">
+            {{ game.icon }}
+          </div>
+          <div class="game-card-info">
+            <div class="game-card-title">{{ game.title }}</div>
+            <div class="game-card-desc">{{ game.desc }}</div>
+          </div>
+          <div class="game-card-arrow">›</div>
+        </a>
+      </div>
+
+      <div style="text-align:center; padding: 16px; color: var(--text-dim); font-size: 12px;">
+        Powered by Darts Games v1.0
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, onMounted, nextTick } = Vue;
+
+    createApp({
+      setup() {
+        const config = STORE_CONFIG;
+        const password = ref('');
+        const authenticated = ref(false);
+        const pwError = ref(false);
+        const pwInput = ref(null);
+        const soundOn = ref(STORE_CONFIG.sounds?.enabled ?? true);
+
+        // テーマカラー適用
+        document.documentElement.style.setProperty('--theme-color', config.color);
+        const rgb = hexToRgb(config.color);
+        if (rgb) document.documentElement.style.setProperty('--theme-color-rgb', `${rgb.r},${rgb.g},${rgb.b}`);
+
+        // セッション認証チェック
+        if (sessionStorage.getItem('darts-auth') === 'true') {
+          authenticated.value = true;
+        }
+
+        function checkPassword() {
+          pwError.value = false;
+          if (password.value === config.password) {
+            authenticated.value = true;
+            sessionStorage.setItem('darts-auth', 'true');
+            SoundEngine.correct();
+          } else if (password.value.length >= config.password.length) {
+            pwError.value = true;
+            password.value = '';
+            SoundEngine.wrong();
+          }
+        }
+
+        function unlockAudio() {
+          SoundEngine.unlock();
+        }
+
+        function toggleSound() {
+          soundOn.value = !soundOn.value;
+          STORE_CONFIG.sounds.enabled = soundOn.value;
+        }
+
+        onMounted(() => {
+          if (!authenticated.value) {
+            nextTick(() => pwInput.value?.focus());
+          }
+        });
+
+        const games = [
+          { id: 'roulette', icon: '🎰', title: '罰ゲームルーレット', desc: '最下位がルーレットを回す！', url: 'games/roulette.html', bg: 'linear-gradient(135deg, #e74c3c, #c0392b)' },
+          { id: 'quiz', icon: '❓', title: 'ダーツ豆知識クイズ', desc: 'Kahoot風4択クイズ', url: 'games/quiz.html', bg: 'linear-gradient(135deg, #9b59b6, #8e44ad)' },
+          { id: 'sprint', icon: '⚡', title: '暗算スプリント', desc: '1分間スコア計算タイムアタック', url: 'games/sprint.html', bg: 'linear-gradient(135deg, #f39c12, #e67e22)' },
+          { id: 'memory', icon: '🃏', title: 'アレンジ神経衰弱', desc: '残り点数とアウトをマッチ', url: 'games/memory.html', bg: 'linear-gradient(135deg, #27ae60, #229954)' },
+          { id: 'higher-lower', icon: '⬆️', title: 'どっちが高い？', desc: 'スコア比較1分タイムアタック', url: 'games/higher-lower.html', bg: 'linear-gradient(135deg, #3498db, #2980b9)' },
+          { id: 'puzzle', icon: '🎯', title: '的狙いパズル', desc: '3投でちょうどX点を作れ', url: 'games/puzzle.html', bg: 'linear-gradient(135deg, #1abc9c, #16a085)' },
+          { id: 'flash', icon: '📚', title: 'アレンジフラッシュ', desc: 'Duolingo風フラッシュカード', url: 'games/flash.html', bg: 'linear-gradient(135deg, #e91e63, #c2185b)' },
+          { id: 'board-quiz', icon: '🔢', title: 'ボード配置クイズ', desc: '隣の数字は何？初心者OK', url: 'games/board-quiz.html', bg: 'linear-gradient(135deg, #00bcd4, #0097a7)' },
+        ];
+
+        return { config, password, authenticated, pwError, pwInput, games, checkPassword, unlockAudio, soundOn, toggleSound, SoundEngine };
+      }
+    }).mount('#app');
+
+    function hexToRgb(hex) {
+      const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      return r ? { r: parseInt(r[1],16), g: parseInt(r[2],16), b: parseInt(r[3],16) } : null;
+    }
+  </script>
+</body>
+</html>

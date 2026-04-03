@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>アレンジフラッシュ</title>
+  <link rel="stylesheet" href="../style.css">
+  <style>
+    .flash-container { display: flex; flex-direction: column; min-height: calc(100dvh - 60px); padding: 16px; }
+    .flash-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .streak-display { display: flex; align-items: center; gap: 6px; font-size: 16px; font-weight: 700; color: var(--warning); }
+    .remain-card { background: var(--surface); border-radius: var(--radius-lg); padding: 32px 24px; text-align: center; margin-bottom: 20px; box-shadow: 0 4px 24px rgba(0,0,0,0.3); }
+    .remain-label { font-size: 16px; color: var(--text-muted); margin-bottom: 8px; }
+    .remain-value { font-size: 56px; font-weight: 900; line-height: 1; }
+    .remain-unit { font-size: 18px; color: var(--text-muted); margin-top: 4px; }
+    .explanation { animation: slide-up 0.3s ease; background: var(--surface); border-radius: var(--radius); padding: 16px; margin-top: 16px; }
+    .explanation .correct-label { color: var(--correct); font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+    .weak-list { max-height: 60vh; overflow-y: auto; }
+    .weak-item { display: flex; justify-content: space-between; padding: 12px; background: var(--surface); border-radius: var(--radius-sm); margin-bottom: 6px; }
+    .start-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80dvh; gap: 20px; padding: 20px; text-align: center; }
+  </style>
+</head>
+<body>
+  <script src="../store/config.js"></script>
+  <script src="../store/sounds.js"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+  <div id="app">
+    <div class="game-header">
+      <a href="../index.html" class="back-btn">←</a>
+      <h1>アレンジフラッシュ</h1>
+    </div>
+
+    <!-- Start -->
+    <div v-if="phase === 'start'" class="start-screen">
+      <div style="font-size:64px;">📚</div>
+      <div style="font-size:24px; font-weight:800;">アレンジフラッシュ</div>
+      <div class="text-muted">毎日20問のアレンジ学習</div>
+      <div v-if="streakDays > 0" class="streak-display" style="font-size:24px;">
+        🔥 {{ streakDays }}日連続
+      </div>
+      <div class="text-muted text-sm">正答率: {{ overallAccuracy }}%</div>
+      <button class="btn btn-primary btn-lg" @click="startSession" style="max-width:280px;">今日の学習スタート</button>
+      <button v-if="weakCount > 0" class="btn btn-outline btn-sm" @click="phase = 'weak'" style="max-width:280px;">
+        苦手リスト（{{ weakCount }}問）
+      </button>
+    </div>
+
+    <!-- Playing -->
+    <div v-if="phase === 'playing'" class="flash-container">
+      <div class="flash-top">
+        <div>
+          <div class="progress-bar" style="width:200px;">
+            <div class="progress-bar-fill" :style="{ width: ((currentIndex + 1) / sessionQuestions.length * 100) + '%' }"></div>
+          </div>
+          <div class="text-sm text-muted mt-8">{{ currentIndex + 1 }} / {{ sessionQuestions.length }}</div>
+        </div>
+        <div v-if="streakDays > 0" class="streak-display">🔥 {{ streakDays }}日</div>
+      </div>
+
+      <div class="remain-card">
+        <div class="remain-label">残り</div>
+        <div class="remain-value" :style="{ color: answered ? (lastCorrect ? 'var(--correct)' : 'var(--wrong)') : 'var(--text)' }">{{ currentQ.remain }}</div>
+        <div class="remain-unit">点</div>
+      </div>
+
+      <div class="choice-stack">
+        <button v-for="(c, i) in shuffledChoices" :key="i"
+          class="choice-btn"
+          :class="{
+            'correct-answer': answered && c === currentQ.correct,
+            'wrong-answer': answered && c !== currentQ.correct
+          }"
+          :disabled="answered"
+          @click="selectChoice(c)"
+          style="text-align:center;">
+          {{ c }}
+        </button>
+      </div>
+
+      <div v-if="answered" class="explanation">
+        <div class="correct-label">正解: {{ currentQ.correct }}</div>
+        <div class="text-sm text-muted">残り{{ currentQ.remain }}点 → {{ currentQ.correct }}で上がり</div>
+        <button class="btn btn-primary mt-16" @click="nextQuestion">
+          {{ currentIndex < sessionQuestions.length - 1 ? '次へ' : '結果を見る' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Weak List -->
+    <div v-if="phase === 'weak'" class="page-content">
+      <div style="font-size:20px; font-weight:700; margin-bottom:16px;">苦手リスト</div>
+      <div class="weak-list">
+        <div v-for="w in weakList" :key="w.remain" class="weak-item">
+          <div>
+            <div style="font-weight:700;">残り {{ w.remain }}</div>
+            <div class="text-sm text-muted">正解: {{ w.correct }}</div>
+          </div>
+          <div class="text-sm" style="color:var(--wrong);">{{ w.accuracy }}%</div>
+        </div>
+        <div v-if="weakList.length === 0" class="text-center text-muted" style="padding:40px;">
+          苦手な問題はありません！
+        </div>
+      </div>
+      <button class="btn btn-secondary mt-16" @click="phase = 'start'">戻る</button>
+    </div>
+
+    <!-- Result -->
+    <div v-if="phase === 'result'" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:80dvh; gap:24px; text-align:center; padding:20px;">
+      <div style="font-size:48px;">{{ correctCount === sessionQuestions.length ? '🏆' : correctCount >= 15 ? '🎉' : '📊' }}</div>
+      <div style="font-size:72px; font-weight:800; background:linear-gradient(135deg, var(--theme-color), #fff); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;">{{ correctCount }}/{{ sessionQuestions.length }}</div>
+      <div v-if="streakDays > 0" class="streak-display" style="font-size:20px;">🔥 {{ streakDays }}日連続学習</div>
+      <div class="result-stats" style="max-width:300px;">
+        <div class="result-stat">
+          <div class="result-stat-value" style="color:var(--correct);">{{ correctCount }}</div>
+          <div class="result-stat-label">正解</div>
+        </div>
+        <div class="result-stat">
+          <div class="result-stat-value" style="color:var(--wrong);">{{ sessionQuestions.length - correctCount }}</div>
+          <div class="result-stat-label">不正解</div>
+        </div>
+        <div class="result-stat">
+          <div class="result-stat-value">{{ Math.round(correctCount / sessionQuestions.length * 100) }}%</div>
+          <div class="result-stat-label">正答率</div>
+        </div>
+      </div>
+      <button class="btn btn-primary" @click="phase = 'start'" style="max-width:280px;">トップに戻る</button>
+      <a href="../index.html" class="btn btn-secondary" style="max-width:280px;">ゲーム一覧に戻る</a>
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, computed } = Vue;
+
+    createApp({
+      setup() {
+        const ARRANGE_DATA = [
+          { remain: 2, correct: "D1", wrong: ["S2", "S1", "T1"] },
+          { remain: 4, correct: "D2", wrong: ["S4", "S2→D1", "T1"] },
+          { remain: 8, correct: "D4", wrong: ["S8", "D2→D1", "S4→D2"] },
+          { remain: 10, correct: "D5", wrong: ["S10", "D3→D2", "S5→D2"] },
+          { remain: 16, correct: "D8", wrong: ["S16", "D4→D2", "T5→S1"] },
+          { remain: 20, correct: "D10", wrong: ["S20", "D5→D5", "T7→S1"] },
+          { remain: 24, correct: "D12", wrong: ["S20→D2", "T8", "D10→D2"] },
+          { remain: 26, correct: "D13", wrong: ["S20→D3", "T9→S1", "S6→D10"] },
+          { remain: 28, correct: "D14", wrong: ["S20→D4", "T9→S1", "D10→D4"] },
+          { remain: 30, correct: "D15", wrong: ["S20→D5", "T10", "D10→D5"] },
+          { remain: 32, correct: "D16", wrong: ["S20→D6", "T10→D1", "D8→D8"] },
+          { remain: 34, correct: "D17", wrong: ["S20→D7", "T11→S1", "D10→D7"] },
+          { remain: 36, correct: "D18", wrong: ["S20→D8", "T12", "D10→D8"] },
+          { remain: 38, correct: "D19", wrong: ["S20→D9", "T12→D1", "D10→D9"] },
+          { remain: 40, correct: "D20", wrong: ["S20→D10", "T13→S1", "D18→D2"] },
+          { remain: 50, correct: "Bull", wrong: ["S20→D15", "D20→D5", "T17→S1"] },
+          { remain: 60, correct: "S20→D20", wrong: ["T20", "D20→D10", "S10→Bull"] },
+          { remain: 61, correct: "T15→D8", wrong: ["S20→D20", "T11→D14", "T20→S1"] },
+          { remain: 70, correct: "T10→D20", wrong: ["T20→D5", "S20→Bull", "T14→D14"] },
+          { remain: 80, correct: "T20→D10", wrong: ["T16→D14", "D20→D20", "T20→S20"] },
+          { remain: 81, correct: "T19→D12", wrong: ["T15→D18", "T20→D10", "T20→S1→D10"] },
+          { remain: 90, correct: "T18→D18", wrong: ["T20→D15", "T20→S30", "Bull→D20"] },
+          { remain: 95, correct: "T19→D19", wrong: ["T20→D17", "Bull→T15", "T15→Bull"] },
+          { remain: 100, correct: "T20→D20", wrong: ["T20→S20→D10", "Bull→Bull", "D20→T20"] },
+          { remain: 101, correct: "T17→Bull", wrong: ["T20→D20", "T19→D22", "T20→S1→D20"] },
+          { remain: 110, correct: "T20→Bull", wrong: ["T20→S20→D15", "T18→D28", "T20→D25"] },
+          { remain: 120, correct: "T20→S20→D20", wrong: ["T20→T20", "T20→Bull→D5", "T19→S13→D20"] },
+          { remain: 130, correct: "T20→T10→D20", wrong: ["T20→Bull→D15", "T19→T13→D20", "T20→S20→Bull"] },
+          { remain: 140, correct: "T20→T20→D10", wrong: ["T20→T18→D4", "T20→Bull→D20", "T19→T19→D12"] },
+          { remain: 150, correct: "T20→T18→D18", wrong: ["T20→T20→D15", "T20→Bull→D20", "T19→T19→D18"] },
+          { remain: 160, correct: "T20→T20→D20", wrong: ["T20→T18→D22", "T20→Bull→T20", "T19→T19→D22"] },
+          { remain: 170, correct: "T20→T20→Bull", wrong: ["T20→T19→Bull", "T19→T19→D28", "T20→T18→D28"] },
+        ];
+
+        const phase = ref('start');
+        const sessionQuestions = ref([]);
+        const currentIndex = ref(0);
+        const answered = ref(false);
+        const lastCorrect = ref(false);
+        const correctCount = ref(0);
+        const shuffledChoices = ref([]);
+
+        // Load stats
+        function loadStats() {
+          return JSON.parse(localStorage.getItem('darts-flash-stats') || '{}');
+        }
+        function saveStats(stats) {
+          localStorage.setItem('darts-flash-stats', JSON.stringify(stats));
+        }
+
+        // Streak
+        const streakDays = ref(0);
+        function updateStreak() {
+          const data = JSON.parse(localStorage.getItem('darts-flash-streak') || '{}');
+          const today = new Date().toISOString().slice(0, 10);
+          const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+
+          if (data.lastDate === today) {
+            streakDays.value = data.count || 1;
+          } else if (data.lastDate === yesterday) {
+            data.count = (data.count || 0) + 1;
+            data.lastDate = today;
+            localStorage.setItem('darts-flash-streak', JSON.stringify(data));
+            streakDays.value = data.count;
+          } else {
+            data.count = 1;
+            data.lastDate = today;
+            localStorage.setItem('darts-flash-streak', JSON.stringify(data));
+            streakDays.value = 1;
+          }
+        }
+
+        const overallAccuracy = computed(() => {
+          const stats = loadStats();
+          let total = 0, correct = 0;
+          Object.values(stats).forEach(s => { total += (s.c || 0) + (s.w || 0); correct += s.c || 0; });
+          return total > 0 ? Math.round(correct / total * 100) : 0;
+        });
+
+        const weakList = computed(() => {
+          const stats = loadStats();
+          return ARRANGE_DATA.filter(q => {
+            const s = stats[q.remain];
+            if (!s) return false;
+            const total = (s.c || 0) + (s.w || 0);
+            return total >= 2 && (s.c || 0) / total < 0.5;
+          }).map(q => {
+            const s = stats[q.remain];
+            const total = (s.c || 0) + (s.w || 0);
+            return { ...q, accuracy: Math.round((s.c || 0) / total * 100) };
+          });
+        });
+
+        const weakCount = computed(() => weakList.value.length);
+
+        const currentQ = computed(() => sessionQuestions.value[currentIndex.value] || ARRANGE_DATA[0]);
+
+        function shuffle(arr) {
+          const a = [...arr];
+          for (let i = a.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [a[i], a[j]] = [a[j], a[i]];
+          }
+          return a;
+        }
+
+        function startSession() {
+          const stats = loadStats();
+          // Prioritize weak questions
+          const weak = ARRANGE_DATA.filter(q => {
+            const s = stats[q.remain];
+            if (!s) return false;
+            const t = (s.c || 0) + (s.w || 0);
+            return t >= 2 && (s.c || 0) / t < 0.5;
+          });
+          const others = ARRANGE_DATA.filter(q => !weak.includes(q));
+          const pool = [...shuffle(weak), ...shuffle(others)].slice(0, 20);
+          sessionQuestions.value = shuffle(pool);
+          currentIndex.value = 0;
+          correctCount.value = 0;
+          answered.value = false;
+          updateChoices();
+          phase.value = 'playing';
+          SoundEngine.tap();
+        }
+
+        function updateChoices() {
+          const q = sessionQuestions.value[currentIndex.value];
+          if (!q) return;
+          const all = [q.correct, ...q.wrong];
+          shuffledChoices.value = shuffle(all);
+        }
+
+        function selectChoice(c) {
+          if (answered.value) return;
+          answered.value = true;
+          const q = currentQ.value;
+          const stats = loadStats();
+          if (!stats[q.remain]) stats[q.remain] = { c: 0, w: 0 };
+
+          if (c === q.correct) {
+            lastCorrect.value = true;
+            correctCount.value++;
+            stats[q.remain].c++;
+            SoundEngine.correct();
+          } else {
+            lastCorrect.value = false;
+            stats[q.remain].w++;
+            SoundEngine.wrong();
+            // Re-add to end for spaced repetition
+            if (currentIndex.value < sessionQuestions.value.length - 2) {
+              const reinsertAt = Math.min(currentIndex.value + 5, sessionQuestions.value.length);
+              sessionQuestions.value.splice(reinsertAt, 0, q);
+            }
+          }
+          saveStats(stats);
+        }
+
+        function nextQuestion() {
+          if (currentIndex.value < sessionQuestions.value.length - 1) {
+            currentIndex.value++;
+            answered.value = false;
+            updateChoices();
+          } else {
+            updateStreak();
+            if (correctCount.value === sessionQuestions.value.length) SoundEngine.fanfare();
+            else SoundEngine.result();
+            phase.value = 'result';
+          }
+        }
+
+        // Init
+        const streakData = JSON.parse(localStorage.getItem('darts-flash-streak') || '{}');
+        const today = new Date().toISOString().slice(0, 10);
+        const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+        if (streakData.lastDate === today || streakData.lastDate === yesterday) {
+          streakDays.value = streakData.count || 0;
+        }
+
+        document.documentElement.style.setProperty('--theme-color', STORE_CONFIG.color);
+
+        return {
+          phase, sessionQuestions, currentIndex, currentQ, answered, lastCorrect,
+          correctCount, shuffledChoices, streakDays, overallAccuracy, weakList, weakCount,
+          startSession, selectChoice, nextQuestion, SoundEngine
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

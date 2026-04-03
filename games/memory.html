@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>アレンジ神経衰弱</title>
+  <link rel="stylesheet" href="../style.css">
+  <style>
+    body { background: #0a1f15; }
+    .memory-container { padding: 16px; }
+    .memory-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .memory-grid { display: grid; gap: 8px; margin-bottom: 16px; }
+    .grid-3x4 { grid-template-columns: repeat(3, 1fr); }
+    .grid-4x4 { grid-template-columns: repeat(4, 1fr); }
+    .grid-4x6 { grid-template-columns: repeat(4, 1fr); }
+    .mem-card { aspect-ratio: 0.75; perspective: 800px; cursor: pointer; }
+    .mem-card-inner { width: 100%; height: 100%; position: relative; transition: transform 0.4s; transform-style: preserve-3d; }
+    .mem-card.flipped .mem-card-inner { transform: rotateY(180deg); }
+    .mem-card-front, .mem-card-back { position: absolute; width: 100%; height: 100%; backface-visibility: hidden; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; flex-direction: column; }
+    .mem-card-back { background: linear-gradient(135deg, #1a3a2a, #0d2818); border: 2px solid #2a5a3a; font-size: 28px; }
+    .mem-card-front { transform: rotateY(180deg); background: var(--surface); border: 2px solid var(--surface3); padding: 8px; text-align: center; }
+    .mem-card-front .label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+    .mem-card-front .value { font-size: 18px; font-weight: 800; }
+    .mem-card.matched .mem-card-front { border-color: var(--correct); background: rgba(var(--correct-rgb), 0.1); }
+    .mem-card.matched .mem-card-inner { transform: rotateY(180deg); }
+    .match-toast { position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%); background: var(--correct); color: white; padding: 12px 24px; border-radius: var(--radius); font-weight: 700; z-index: 50; animation: slide-up 0.3s ease, fade-out 0.3s ease 1.2s forwards; }
+    @keyframes fade-out { to { opacity: 0; } }
+    .start-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80dvh; gap: 20px; padding: 20px; text-align: center; }
+    .stars { font-size: 36px; letter-spacing: 8px; }
+  </style>
+</head>
+<body>
+  <script src="../store/config.js"></script>
+  <script src="../store/sounds.js"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+  <div id="app">
+    <div class="game-header" style="background:#0a1f15; border-color:#1a3a2a;">
+      <a href="../index.html" class="back-btn" style="background:#1a3a2a;">←</a>
+      <h1>アレンジ神経衰弱</h1>
+    </div>
+
+    <!-- Start -->
+    <div v-if="phase === 'start'" class="start-screen">
+      <div style="font-size:64px;">🃏</div>
+      <div style="font-size:24px; font-weight:800;">アレンジ神経衰弱</div>
+      <div class="text-muted">残り点数とアウトをマッチさせよう</div>
+      <div class="difficulty-selector" style="max-width:300px; width:100%; background:#1a3a2a;">
+        <button v-for="d in difficulties" :key="d.key" class="difficulty-btn" :class="{ active: difficulty === d.key }" @click="difficulty = d.key; SoundEngine.tap()" style="color:#aaa;">
+          {{ d.label }}
+        </button>
+      </div>
+      <div v-if="getBestTime()" class="badge" style="background:rgba(var(--correct-rgb),0.15); color:var(--correct); font-size:14px; padding:8px 16px;">
+        ⏱ ベスト: {{ getBestTime() }}秒
+      </div>
+      <button class="btn btn-primary btn-lg" @click="startGame" style="max-width:280px;">スタート！</button>
+    </div>
+
+    <!-- Game -->
+    <div v-if="phase === 'playing'" class="memory-container">
+      <div class="memory-top">
+        <div><span style="font-weight:700;">{{ matchedCount }}</span><span class="text-muted"> / {{ pairCount }}ペア</span></div>
+        <div><span class="text-muted">手数: </span><span style="font-weight:700;">{{ moves }}</span></div>
+        <div style="font-weight:700;">⏱ {{ elapsedTime }}s</div>
+      </div>
+
+      <div class="memory-grid" :class="gridClass">
+        <div v-for="card in cards" :key="card.id"
+          class="mem-card"
+          :class="{ flipped: card.flipped || card.matched, matched: card.matched }"
+          @click="flipCard(card)">
+          <div class="mem-card-inner">
+            <div class="mem-card-back">🎯</div>
+            <div class="mem-card-front">
+              <div class="label">{{ card.type === 'score' ? '残り' : 'アウト' }}</div>
+              <div class="value" :style="{ color: card.matched ? 'var(--correct)' : 'var(--text)' }">
+                {{ card.type === 'score' ? card.pair.score : card.pair.out }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="matchToast" class="match-toast">残り{{ matchToast.score }} = {{ matchToast.out }} ✓</div>
+    </div>
+
+    <!-- Result -->
+    <div v-if="phase === 'result'" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:80dvh; gap:24px; text-align:center; padding:20px;">
+      <div class="stars">{{ starRating >= 3 ? '⭐⭐⭐' : starRating >= 2 ? '⭐⭐☆' : '⭐☆☆' }}</div>
+      <div style="font-size:24px; font-weight:800;">クリア！</div>
+      <div v-if="isNewRecord" style="color:var(--warning); font-weight:700;">🔥 ベストタイム更新！</div>
+      <div class="result-stats" style="max-width:300px;">
+        <div class="result-stat">
+          <div class="result-stat-value">{{ elapsedTime }}s</div>
+          <div class="result-stat-label">タイム</div>
+        </div>
+        <div class="result-stat">
+          <div class="result-stat-value">{{ moves }}</div>
+          <div class="result-stat-label">手数</div>
+        </div>
+        <div class="result-stat">
+          <div class="result-stat-value">{{ starRating }}</div>
+          <div class="result-stat-label">スター</div>
+        </div>
+      </div>
+      <button class="btn btn-primary" @click="phase = 'start'" style="max-width:280px;">もう一度プレイ</button>
+      <a href="../index.html" class="btn btn-secondary" style="max-width:280px;">ゲーム一覧に戻る</a>
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, computed, onUnmounted } = Vue;
+
+    createApp({
+      setup() {
+        const ARRANGEMENTS = [
+          { score: 2, out: "D1" }, { score: 4, out: "D2" }, { score: 6, out: "D3" },
+          { score: 8, out: "D4" }, { score: 10, out: "D5" }, { score: 12, out: "D6" },
+          { score: 14, out: "D7" }, { score: 16, out: "D8" }, { score: 18, out: "D9" },
+          { score: 20, out: "D10" }, { score: 22, out: "D11" }, { score: 24, out: "D12" },
+          { score: 26, out: "D13" }, { score: 28, out: "D14" }, { score: 30, out: "D15" },
+          { score: 32, out: "D16" }, { score: 34, out: "D17" }, { score: 36, out: "D18" },
+          { score: 38, out: "D19" }, { score: 40, out: "D20" }, { score: 50, out: "Bull" },
+          { score: 170, out: "T20→T20→Bull" }, { score: 167, out: "T20→T19→Bull" },
+          { score: 160, out: "T20→T20→D20" }, { score: 120, out: "T20→S20→D20" },
+        ];
+
+        const difficulties = [
+          { key: 'easy', label: 'EASY', pairs: 6 },
+          { key: 'normal', label: 'NORMAL', pairs: 8 },
+          { key: 'hard', label: 'HARD', pairs: 12 },
+        ];
+
+        const phase = ref('start');
+        const difficulty = ref('normal');
+        const cards = ref([]);
+        const moves = ref(0);
+        const matchedCount = ref(0);
+        const elapsedTime = ref(0);
+        const matchToast = ref(null);
+        const isNewRecord = ref(false);
+        const starRating = ref(0);
+        let flippedCards = [];
+        let lockBoard = false;
+        let gameTimer = null;
+        let toastTimer = null;
+
+        const pairCount = computed(() => difficulties.find(d => d.key === difficulty.value).pairs);
+        const gridClass = computed(() => {
+          if (difficulty.value === 'easy') return 'grid-3x4';
+          if (difficulty.value === 'normal') return 'grid-4x4';
+          return 'grid-4x6';
+        });
+
+        function shuffle(arr) {
+          const a = [...arr];
+          for (let i = a.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [a[i], a[j]] = [a[j], a[i]];
+          }
+          return a;
+        }
+
+        function startGame() {
+          const pairs = shuffle(ARRANGEMENTS).slice(0, pairCount.value);
+          const cardList = [];
+          pairs.forEach((pair, i) => {
+            cardList.push({ id: i * 2, pair, type: 'score', flipped: false, matched: false, pairIndex: i });
+            cardList.push({ id: i * 2 + 1, pair, type: 'out', flipped: false, matched: false, pairIndex: i });
+          });
+          cards.value = shuffle(cardList);
+          moves.value = 0;
+          matchedCount.value = 0;
+          elapsedTime.value = 0;
+          isNewRecord.value = false;
+          flippedCards = [];
+          lockBoard = false;
+          phase.value = 'playing';
+          SoundEngine.tap();
+
+          gameTimer = setInterval(() => { elapsedTime.value++; }, 1000);
+        }
+
+        function flipCard(card) {
+          if (lockBoard || card.flipped || card.matched || flippedCards.length >= 2) return;
+          card.flipped = true;
+          flippedCards.push(card);
+          SoundEngine.flip();
+
+          if (flippedCards.length === 2) {
+            moves.value++;
+            lockBoard = true;
+            const [a, b] = flippedCards;
+
+            if (a.pairIndex === b.pairIndex) {
+              a.matched = true;
+              b.matched = true;
+              matchedCount.value++;
+              SoundEngine.match();
+
+              matchToast.value = a.pair;
+              clearTimeout(toastTimer);
+              toastTimer = setTimeout(() => { matchToast.value = null; }, 1500);
+
+              flippedCards = [];
+              lockBoard = false;
+
+              if (matchedCount.value === pairCount.value) {
+                clearInterval(gameTimer);
+                setTimeout(() => endGame(), 500);
+              }
+            } else {
+              SoundEngine.wrong();
+              setTimeout(() => {
+                a.flipped = false;
+                b.flipped = false;
+                flippedCards = [];
+                lockBoard = false;
+              }, 800);
+            }
+          }
+        }
+
+        function endGame() {
+          SoundEngine.fanfare();
+          const optimal = pairCount.value;
+          const ratio = optimal / moves.value;
+          starRating.value = ratio >= 0.8 ? 3 : ratio >= 0.5 ? 2 : 1;
+
+          const scores = JSON.parse(localStorage.getItem('darts-memory-scores') || '{}');
+          const key = difficulty.value;
+          const prev = scores[key] || 9999;
+          if (elapsedTime.value < prev) {
+            scores[key] = elapsedTime.value;
+            localStorage.setItem('darts-memory-scores', JSON.stringify(scores));
+            isNewRecord.value = true;
+          }
+          phase.value = 'result';
+        }
+
+        function getBestTime() {
+          const scores = JSON.parse(localStorage.getItem('darts-memory-scores') || '{}');
+          const t = scores[difficulty.value];
+          return t && t < 9999 ? t : 0;
+        }
+
+        onUnmounted(() => { clearInterval(gameTimer); clearTimeout(toastTimer); });
+
+        document.documentElement.style.setProperty('--theme-color', STORE_CONFIG.color);
+
+        return {
+          phase, difficulty, difficulties, cards, moves, matchedCount, pairCount,
+          elapsedTime, gridClass, matchToast, isNewRecord, starRating,
+          startGame, flipCard, getBestTime, SoundEngine
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

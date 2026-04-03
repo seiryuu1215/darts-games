@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>的狙いパズル</title>
+  <link rel="stylesheet" href="../style.css">
+  <style>
+    .puzzle-container { display: flex; flex-direction: column; min-height: calc(100dvh - 60px); padding: 12px; }
+    .target-display { text-align: center; margin-bottom: 8px; }
+    .target-label { font-size: 14px; color: var(--text-muted); }
+    .target-value { font-size: 48px; font-weight: 900; color: var(--theme-color); }
+    .board-wrapper { width: 100%; max-width: 340px; margin: 0 auto 8px; aspect-ratio: 1; }
+    .board-wrapper svg { width: 100%; height: 100%; }
+    .board-wrapper svg path { cursor: pointer; transition: opacity 0.1s; }
+    .board-wrapper svg path:active { opacity: 0.7; }
+    .slots { display: flex; gap: 8px; justify-content: center; margin-bottom: 8px; }
+    .slot { flex: 1; max-width: 100px; height: 48px; background: var(--surface); border: 2px dashed var(--surface3); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s; }
+    .slot.filled { border-style: solid; border-color: var(--theme-color); background: rgba(var(--theme-color-rgb), 0.1); }
+    .slot.filled:active { transform: scale(0.95); }
+    .total-display { text-align: center; margin-bottom: 8px; }
+    .total-value { font-size: 28px; font-weight: 800; }
+    .action-buttons { display: flex; gap: 8px; }
+    .hint-box { background: var(--surface); border-radius: var(--radius-sm); padding: 12px; margin-top: 8px; font-size: 14px; color: var(--text-muted); text-align: center; border-left: 3px solid var(--warning); }
+    .mode-toggle { display: flex; gap: 8px; margin-bottom: 12px; }
+    .mode-btn { flex: 1; padding: 10px; border: 2px solid var(--surface3); border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; text-align: center; transition: all 0.2s; }
+    .mode-btn.active { border-color: var(--theme-color); color: var(--theme-color); background: rgba(var(--theme-color-rgb), 0.1); }
+    .result-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .result-box { background: var(--surface); border-radius: var(--radius-lg); padding: 32px 24px; text-align: center; max-width: 300px; width: 90%; animation: bounce-in 0.5s ease; }
+    .start-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80dvh; gap: 20px; padding: 20px; text-align: center; }
+  </style>
+</head>
+<body>
+  <script src="../store/config.js"></script>
+  <script src="../store/sounds.js"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+  <div id="app">
+    <div class="game-header">
+      <a href="../index.html" class="back-btn">←</a>
+      <h1>的狙いパズル</h1>
+    </div>
+
+    <!-- Start -->
+    <div v-if="phase === 'start'" class="start-screen">
+      <div style="font-size:64px;">🎯</div>
+      <div style="font-size:24px; font-weight:800;">的狙いパズル</div>
+      <div class="text-muted">3投でちょうどX点を作れ！</div>
+      <div class="mode-toggle" style="max-width:300px; width:100%;">
+        <button class="mode-btn" :class="{ active: mode === 'daily' }" @click="mode = 'daily'; SoundEngine.tap()">📅 今日のパズル</button>
+        <button class="mode-btn" :class="{ active: mode === 'random' }" @click="mode = 'random'; SoundEngine.tap()">🔀 ランダム</button>
+      </div>
+      <div v-if="dailyCompleted && mode === 'daily'" class="badge badge-correct" style="font-size:14px; padding:8px 16px;">✓ 今日のパズルはクリア済み</div>
+      <button class="btn btn-primary btn-lg" @click="startGame" style="max-width:280px;">スタート！</button>
+    </div>
+
+    <!-- Game -->
+    <div v-if="phase === 'playing'" class="puzzle-container">
+      <div class="target-display">
+        <div class="target-label">{{ mode === 'daily' ? '📅 今日のパズル' : '🔀 ランダム' }}</div>
+        <div class="target-value">{{ currentPuzzle.target }}点</div>
+      </div>
+
+      <div class="board-wrapper">
+        <svg viewBox="0 0 400 400">
+          <!-- Segments -->
+          <g v-for="(num, i) in boardOrder" :key="'seg-'+i">
+            <!-- Double ring -->
+            <path :d="arcPath(i, 170, 190)" :fill="isSelected('D'+num) ? themeColor : (i%2===0 ? '#c0392b' : '#27ae60')" stroke="#111" stroke-width="1" @click="selectSegment('D'+num, num*2)"/>
+            <!-- Outer single -->
+            <path :d="arcPath(i, 115, 170)" :fill="isSelected('S'+num) ? themeColor : (i%2===0 ? '#f5f5dc' : '#222')" stroke="#111" stroke-width="0.5" @click="selectSegment('S'+num, num)"/>
+            <!-- Triple ring -->
+            <path :d="arcPath(i, 105, 115)" :fill="isSelected('T'+num) ? themeColor : (i%2===0 ? '#c0392b' : '#27ae60')" stroke="#111" stroke-width="1" @click="selectSegment('T'+num, num*3)"/>
+            <!-- Inner single -->
+            <path :d="arcPath(i, 40, 105)" :fill="isSelected('S'+num) ? themeColor : (i%2===0 ? '#f5f5dc' : '#222')" stroke="#111" stroke-width="0.5" @click="selectSegment('S'+num, num)"/>
+          </g>
+          <!-- Number labels -->
+          <text v-for="(num, i) in boardOrder" :key="'lbl-'+i" :x="labelPos(i).x" :y="labelPos(i).y" text-anchor="middle" dominant-baseline="middle" fill="#ddd" font-size="12" font-weight="700" pointer-events="none">{{ num }}</text>
+          <!-- Outer bull -->
+          <circle cx="200" cy="200" r="40" :fill="isSelected('25') ? themeColor : '#0d4a0d'" stroke="#1a6a1a" stroke-width="1" @click="selectSegment('25', 25)" style="cursor:pointer;"/>
+          <!-- Inner bull -->
+          <circle cx="200" cy="200" r="16" :fill="isSelected('Bull') ? themeColor : '#c0392b'" stroke="#e74c3c" stroke-width="1" @click="selectSegment('Bull', 50)" style="cursor:pointer;"/>
+          <text x="200" y="200" text-anchor="middle" dominant-baseline="middle" fill="white" font-size="9" font-weight="700" pointer-events="none">BULL</text>
+        </svg>
+      </div>
+
+      <div class="slots">
+        <div v-for="(s, i) in slots" :key="i" class="slot" :class="{ filled: s.label }" @click="removeSlot(i)">
+          {{ s.label || (i+1) + '投目' }}
+        </div>
+      </div>
+
+      <div class="total-display">
+        <span class="text-muted text-sm">合計: </span>
+        <span class="total-value" :style="{ color: totalScore === currentPuzzle.target ? 'var(--correct)' : totalScore > currentPuzzle.target ? 'var(--wrong)' : 'var(--text)' }">{{ totalScore }}</span>
+        <span class="text-muted"> / {{ currentPuzzle.target }}</span>
+      </div>
+
+      <div class="action-buttons">
+        <button class="btn btn-secondary btn-sm" @click="clearSlots" style="flex:1;">クリア</button>
+        <button class="btn btn-sm" @click="showHint = !showHint" style="flex:1; background:var(--surface2); color:var(--warning);">💡 ヒント</button>
+        <button class="btn btn-primary btn-sm" @click="checkAnswer" :disabled="filledCount === 0" style="flex:2;">決定！</button>
+      </div>
+
+      <div v-if="showHint" class="hint-box">💡 {{ currentPuzzle.hint }}</div>
+    </div>
+
+    <!-- Result overlay -->
+    <div v-if="showResult" class="result-overlay" @click="closeResult">
+      <div class="result-box" @click.stop>
+        <div style="font-size:48px; margin-bottom:12px;">{{ resultCorrect ? '🎉' : '😅' }}</div>
+        <div style="font-size:24px; font-weight:800; margin-bottom:8px;">{{ resultCorrect ? 'クリア！' : '不正解…' }}</div>
+        <div v-if="resultCorrect" class="text-muted" style="margin-bottom:16px;">
+          {{ slots.filter(s=>s.label).map(s=>s.label).join(' + ') }} = {{ totalScore }}
+        </div>
+        <div v-else class="text-muted" style="margin-bottom:16px;">
+          合計 {{ totalScore }} ≠ 目標 {{ currentPuzzle.target }}
+        </div>
+        <button v-if="resultCorrect" class="btn btn-primary" @click="nextPuzzle">{{ mode === 'daily' ? 'トップに戻る' : '次のパズル' }}</button>
+        <button v-else class="btn btn-secondary" @click="showResult = false">もう一度</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, computed } = Vue;
+
+    createApp({
+      setup() {
+        const boardOrder = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
+        const segAngle = 360 / 20;
+        const themeColor = STORE_CONFIG.color || '#378ADD';
+
+        const PUZZLES = [
+          { target: 20, hint: "シングル20、またはD10！" },
+          { target: 40, hint: "D20一択！" },
+          { target: 50, hint: "ブル！" },
+          { target: 60, hint: "T20一択！" },
+          { target: 80, hint: "T20 + S20 かな？" },
+          { target: 100, hint: "T20 + D20 など複数解あり" },
+          { target: 120, hint: "T20 + S20 + D20" },
+          { target: 140, hint: "T20 + T20 + D10" },
+          { target: 150, hint: "T20 + T18 + D18" },
+          { target: 160, hint: "T20 + T20 + D20" },
+          { target: 170, hint: "最高のアレンジ。T20→T20→Bull" },
+          { target: 90, hint: "T18 + D18 とか？" },
+          { target: 110, hint: "T20 + Bull とか？" },
+          { target: 45, hint: "S5 + D20 とか？" },
+          { target: 75, hint: "T15 + D15 とか？" },
+        ];
+
+        const phase = ref('start');
+        const mode = ref('daily');
+        const currentPuzzle = ref(PUZZLES[0]);
+        const slots = ref([{ label: '', score: 0 }, { label: '', score: 0 }, { label: '', score: 0 }]);
+        const showHint = ref(false);
+        const showResult = ref(false);
+        const resultCorrect = ref(false);
+
+        const totalScore = computed(() => slots.value.reduce((s, sl) => s + sl.score, 0));
+        const filledCount = computed(() => slots.value.filter(s => s.label).length);
+
+        // Daily puzzle
+        const today = new Date();
+        const dayOfYear = Math.floor((today - new Date(today.getFullYear(), 0, 0)) / 86400000);
+        const dailyIndex = dayOfYear % PUZZLES.length;
+        const dailyData = JSON.parse(localStorage.getItem('darts-puzzle-daily') || '{}');
+        const dailyCompleted = ref(dailyData.date === today.toISOString().slice(0, 10));
+
+        function polarToXY(r, angleDeg) {
+          const rad = (angleDeg - 90) * Math.PI / 180;
+          return { x: 200 + r * Math.cos(rad), y: 200 + r * Math.sin(rad) };
+        }
+
+        function arcPath(i, rInner, rOuter) {
+          const a1 = i * segAngle;
+          const a2 = a1 + segAngle;
+          const p1 = polarToXY(rOuter, a1);
+          const p2 = polarToXY(rOuter, a2);
+          const p3 = polarToXY(rInner, a2);
+          const p4 = polarToXY(rInner, a1);
+          return `M${p1.x},${p1.y} A${rOuter},${rOuter} 0 0,1 ${p2.x},${p2.y} L${p3.x},${p3.y} A${rInner},${rInner} 0 0,0 ${p4.x},${p4.y} Z`;
+        }
+
+        function labelPos(i) {
+          const angle = i * segAngle + segAngle / 2;
+          return polarToXY(196, angle);
+        }
+
+        function isSelected(label) {
+          return slots.value.some(s => s.label === label);
+        }
+
+        function selectSegment(label, score) {
+          const emptySlot = slots.value.find(s => !s.label);
+          if (!emptySlot) return;
+          emptySlot.label = label;
+          emptySlot.score = score;
+          SoundEngine.tap();
+        }
+
+        function removeSlot(i) {
+          if (!slots.value[i].label) return;
+          slots.value[i] = { label: '', score: 0 };
+          SoundEngine.tap();
+        }
+
+        function clearSlots() {
+          slots.value = [{ label: '', score: 0 }, { label: '', score: 0 }, { label: '', score: 0 }];
+          showHint.value = false;
+          SoundEngine.tap();
+        }
+
+        function checkAnswer() {
+          resultCorrect.value = totalScore.value === currentPuzzle.value.target;
+          showResult.value = true;
+          if (resultCorrect.value) {
+            SoundEngine.correct();
+            if (mode.value === 'daily') {
+              localStorage.setItem('darts-puzzle-daily', JSON.stringify({ date: today.toISOString().slice(0, 10) }));
+              dailyCompleted.value = true;
+              SoundEngine.fanfare();
+            }
+          } else {
+            SoundEngine.wrong();
+          }
+        }
+
+        function closeResult() {
+          showResult.value = false;
+        }
+
+        function nextPuzzle() {
+          showResult.value = false;
+          if (mode.value === 'daily') {
+            phase.value = 'start';
+          } else {
+            const idx = Math.floor(Math.random() * PUZZLES.length);
+            currentPuzzle.value = PUZZLES[idx];
+            clearSlots();
+          }
+        }
+
+        function startGame() {
+          if (mode.value === 'daily') {
+            currentPuzzle.value = PUZZLES[dailyIndex];
+          } else {
+            currentPuzzle.value = PUZZLES[Math.floor(Math.random() * PUZZLES.length)];
+          }
+          clearSlots();
+          showHint.value = false;
+          phase.value = 'playing';
+          SoundEngine.tap();
+        }
+
+        document.documentElement.style.setProperty('--theme-color', STORE_CONFIG.color);
+
+        return {
+          boardOrder, themeColor, phase, mode, currentPuzzle, slots, showHint, showResult,
+          resultCorrect, totalScore, filledCount, dailyCompleted,
+          arcPath, labelPos, isSelected, selectSegment, removeSlot, clearSlots,
+          checkAnswer, closeResult, nextPuzzle, startGame, SoundEngine
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

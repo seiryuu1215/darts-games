@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>暗算スプリント</title>
+  <link rel="stylesheet" href="../style.css">
+  <style>
+    .sprint-container { display: flex; flex-direction: column; min-height: calc(100dvh - 60px); }
+    .timer-section { padding: 8px 16px; }
+    .score-section { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; }
+    .question-section { flex: 1; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .question-text { font-size: 32px; font-weight: 800; text-align: center; word-break: break-all; }
+    .answer-display { font-size: 48px; font-weight: 800; text-align: center; min-height: 64px; color: var(--theme-color); letter-spacing: 4px; margin-top: 12px; }
+    .numpad-section { padding: 8px 12px 16px; }
+    .numpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .numpad-btn { display: flex; align-items: center; justify-content: center; height: 56px; border: none; border-radius: var(--radius-sm); background: var(--surface2); color: var(--text); font-size: 24px; font-weight: 600; cursor: pointer; font-family: inherit; transition: transform 0.1s, background 0.1s; }
+    .numpad-btn:active { transform: scale(0.95); background: var(--surface3); }
+    .numpad-btn.action { background: var(--theme-color); color: white; }
+    .numpad-btn.delete { background: var(--surface3); font-size: 18px; }
+    .flash-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 50; opacity: 0; transition: opacity 0.15s; }
+    .flash-overlay.green { background: rgba(var(--correct-rgb), 0.25); opacity: 1; }
+    .flash-overlay.red { background: rgba(var(--wrong-rgb), 0.25); opacity: 1; }
+    .correct-answer-popup { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--surface); padding: 16px 32px; border-radius: var(--radius); font-size: 24px; font-weight: 700; z-index: 60; animation: bounce-in 0.3s ease; }
+    .countdown-overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.8); z-index: 100; }
+    .countdown-num { font-size: 120px; font-weight: 900; color: var(--theme-color); animation: bounce-in 0.5s ease; }
+    .start-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80dvh; gap: 20px; padding: 20px; text-align: center; }
+    .high-score-badge { background: rgba(var(--warning-rgb), 0.15); color: var(--warning); padding: 6px 14px; border-radius: 20px; font-size: 14px; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <script src="../store/config.js"></script>
+  <script src="../store/sounds.js"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+  <div id="app">
+    <div class="game-header">
+      <a href="../index.html" class="back-btn">←</a>
+      <h1>暗算スプリント</h1>
+    </div>
+
+    <!-- Start Screen -->
+    <div v-if="phase === 'start'" class="start-screen">
+      <div style="font-size:64px;">⚡</div>
+      <div style="font-size:24px; font-weight:800;">暗算スプリント</div>
+      <div class="text-muted">1分間でダーツのスコアを暗算！</div>
+      <div class="difficulty-selector" style="max-width:300px; width:100%;">
+        <button v-for="d in ['easy','normal','hard']" :key="d" class="difficulty-btn" :class="{ active: difficulty === d }" @click="difficulty = d; SoundEngine.tap()">
+          {{ { easy: 'EASY', normal: 'NORMAL', hard: 'HARD' }[d] }}
+        </button>
+      </div>
+      <div v-if="getHighScore()" class="high-score-badge">🏆 ハイスコア: {{ getHighScore() }}問</div>
+      <button class="btn btn-primary btn-lg" @click="startCountdown" style="max-width:280px;">スタート！</button>
+    </div>
+
+    <!-- Countdown -->
+    <div v-if="phase === 'countdown'" class="countdown-overlay">
+      <div :key="countdownNum" class="countdown-num">{{ countdownNum }}</div>
+    </div>
+
+    <!-- Game -->
+    <div v-if="phase === 'playing'" class="sprint-container">
+      <div class="timer-section">
+        <div class="timer-bar">
+          <div class="timer-bar-fill" :class="{ danger: timeLeft <= 10 }" :style="{ width: (timeLeft / 60 * 100) + '%' }"></div>
+        </div>
+      </div>
+      <div class="score-section">
+        <div>
+          <span style="font-size:14px; color:var(--text-muted);">正解</span>
+          <span style="font-size:24px; font-weight:800; margin-left:8px;">{{ score }}</span>
+        </div>
+        <div v-if="streak >= 2" class="streak animate-bounce-in">
+          🔥 {{ streak }}
+        </div>
+      </div>
+      <div class="question-section">
+        <div>
+          <div class="question-text">{{ currentQuestion.label }}</div>
+          <div class="answer-display">{{ userAnswer || '　' }}</div>
+        </div>
+      </div>
+      <div class="numpad-section">
+        <div class="numpad">
+          <button v-for="n in [1,2,3,4,5,6,7,8,9]" :key="n" class="numpad-btn" @click="pressKey(n)">{{ n }}</button>
+          <button class="numpad-btn delete" @click="pressDelete">⌫</button>
+          <button class="numpad-btn" @click="pressKey(0)">0</button>
+          <button class="numpad-btn action" @click="submitAnswer">OK</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Flash overlay -->
+    <div class="flash-overlay" :class="flashClass"></div>
+    <div v-if="showCorrectAnswer" class="correct-answer-popup" style="color:var(--correct);">
+      正解: {{ correctAnswerValue }}
+    </div>
+
+    <!-- Result -->
+    <div v-if="phase === 'result'" class="result-container" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:80dvh; gap:24px; text-align:center; padding:20px;">
+      <div style="font-size:48px;">{{ isNewRecord ? '🏆' : score >= 15 ? '🎉' : '⚡' }}</div>
+      <div v-if="isNewRecord" style="color:var(--warning); font-size:16px; font-weight:700;">🔥 NEW RECORD!</div>
+      <div style="font-size:72px; font-weight:800; background:linear-gradient(135deg, var(--theme-color), #fff); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;">{{ score }}</div>
+      <div style="font-size:16px; color:var(--text-muted);">問正解</div>
+      <div class="result-stats" style="max-width:320px;">
+        <div class="result-stat">
+          <div class="result-stat-value" style="color:var(--wrong);">{{ wrongCount }}</div>
+          <div class="result-stat-label">不正解</div>
+        </div>
+        <div class="result-stat">
+          <div class="result-stat-value" style="color:var(--warning);">🔥{{ maxStreak }}</div>
+          <div class="result-stat-label">最長連続</div>
+        </div>
+        <div class="result-stat">
+          <div class="result-stat-value">{{ avgTime }}s</div>
+          <div class="result-stat-label">平均回答</div>
+        </div>
+      </div>
+      <button class="btn btn-primary" @click="phase = 'start'" style="max-width:280px;">もう一度プレイ</button>
+      <a href="../index.html" class="btn btn-secondary" style="max-width:280px;">ゲーム一覧に戻る</a>
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, onUnmounted } = Vue;
+
+    createApp({
+      setup() {
+        const phase = ref('start');
+        const difficulty = ref('normal');
+        const countdownNum = ref(3);
+        const timeLeft = ref(60);
+        const score = ref(0);
+        const wrongCount = ref(0);
+        const streak = ref(0);
+        const maxStreak = ref(0);
+        const userAnswer = ref('');
+        const currentQuestion = ref({ label: '', answer: 0 });
+        const flashClass = ref('');
+        const showCorrectAnswer = ref(false);
+        const correctAnswerValue = ref(0);
+        const isNewRecord = ref(false);
+        const avgTime = ref('0.0');
+        let timer = null;
+        let questionStartTime = 0;
+        let totalAnswerTime = 0;
+        let locked = false;
+
+        function generateThrow(diff) {
+          const r = Math.random();
+          if (diff === 'easy') {
+            if (r < 0.1) return { label: 'Bull', score: 50 };
+            if (r < 0.2) return { label: '25', score: 25 };
+            const n = Math.floor(Math.random() * 20) + 1;
+            return { label: `S${n}`, score: n };
+          }
+          if (diff === 'normal') {
+            if (r < 0.08) return { label: 'Bull', score: 50 };
+            if (r < 0.15) return { label: '25', score: 25 };
+            const n = Math.floor(Math.random() * 20) + 1;
+            if (r < 0.5) return { label: `S${n}`, score: n };
+            return { label: `D${n}`, score: n * 2 };
+          }
+          if (r < 0.05) return { label: 'Bull', score: 50 };
+          if (r < 0.1) return { label: '25', score: 25 };
+          const n = Math.floor(Math.random() * 20) + 1;
+          if (r < 0.4) return { label: `S${n}`, score: n };
+          if (r < 0.7) return { label: `D${n}`, score: n * 2 };
+          return { label: `T${n}`, score: n * 3 };
+        }
+
+        function generateQuestion() {
+          const throws = [generateThrow(difficulty.value), generateThrow(difficulty.value), generateThrow(difficulty.value)];
+          const answer = throws.reduce((sum, t) => sum + t.score, 0);
+          const label = throws.map(t => t.label).join(' + ') + ' = ?';
+          currentQuestion.value = { label, answer };
+          userAnswer.value = '';
+          questionStartTime = Date.now();
+        }
+
+        function startCountdown() {
+          phase.value = 'countdown';
+          countdownNum.value = 3;
+          SoundEngine.countdown();
+          const cd = setInterval(() => {
+            countdownNum.value--;
+            if (countdownNum.value > 0) SoundEngine.countdown();
+            if (countdownNum.value <= 0) {
+              clearInterval(cd);
+              startGame();
+            }
+          }, 1000);
+        }
+
+        function startGame() {
+          phase.value = 'playing';
+          timeLeft.value = 60;
+          score.value = 0;
+          wrongCount.value = 0;
+          streak.value = 0;
+          maxStreak.value = 0;
+          totalAnswerTime = 0;
+          locked = false;
+          generateQuestion();
+          timer = setInterval(() => {
+            timeLeft.value--;
+            if (timeLeft.value <= 0) {
+              clearInterval(timer);
+              endGame();
+            }
+          }, 1000);
+        }
+
+        function pressKey(n) {
+          if (locked || phase.value !== 'playing') return;
+          if (userAnswer.value.length < 4) {
+            userAnswer.value += String(n);
+            SoundEngine.tap();
+          }
+        }
+
+        function pressDelete() {
+          if (locked || phase.value !== 'playing') return;
+          userAnswer.value = userAnswer.value.slice(0, -1);
+          SoundEngine.tap();
+        }
+
+        function submitAnswer() {
+          if (locked || phase.value !== 'playing' || !userAnswer.value) return;
+          locked = true;
+          const ans = parseInt(userAnswer.value);
+          const elapsed = (Date.now() - questionStartTime) / 1000;
+          totalAnswerTime += elapsed;
+
+          if (ans === currentQuestion.value.answer) {
+            score.value++;
+            streak.value++;
+            if (streak.value > maxStreak.value) maxStreak.value = streak.value;
+            flashClass.value = 'green';
+            SoundEngine.correct();
+            setTimeout(() => {
+              flashClass.value = '';
+              generateQuestion();
+              locked = false;
+            }, 300);
+          } else {
+            wrongCount.value++;
+            streak.value = 0;
+            correctAnswerValue.value = currentQuestion.value.answer;
+            flashClass.value = 'red';
+            showCorrectAnswer.value = true;
+            SoundEngine.wrong();
+            setTimeout(() => {
+              flashClass.value = '';
+              showCorrectAnswer.value = false;
+              generateQuestion();
+              locked = false;
+            }, 800);
+          }
+        }
+
+        function endGame() {
+          SoundEngine.timeup();
+          const totalAnswered = score.value + wrongCount.value;
+          avgTime.value = totalAnswered > 0 ? (totalAnswerTime / totalAnswered).toFixed(1) : '0.0';
+
+          const scores = JSON.parse(localStorage.getItem('darts-sprint-scores') || '{}');
+          const key = difficulty.value;
+          const prev = scores[key] || 0;
+          isNewRecord.value = score.value > prev;
+          if (isNewRecord.value) {
+            scores[key] = score.value;
+            localStorage.setItem('darts-sprint-scores', JSON.stringify(scores));
+            SoundEngine.fanfare();
+          }
+          phase.value = 'result';
+        }
+
+        function getHighScore() {
+          const scores = JSON.parse(localStorage.getItem('darts-sprint-scores') || '{}');
+          return scores[difficulty.value] || 0;
+        }
+
+        // Keyboard support
+        function handleKeydown(e) {
+          if (phase.value !== 'playing') return;
+          if (e.key >= '0' && e.key <= '9') pressKey(parseInt(e.key));
+          else if (e.key === 'Backspace') pressDelete();
+          else if (e.key === 'Enter') submitAnswer();
+        }
+        document.addEventListener('keydown', handleKeydown);
+        onUnmounted(() => {
+          document.removeEventListener('keydown', handleKeydown);
+          clearInterval(timer);
+        });
+
+        document.documentElement.style.setProperty('--theme-color', STORE_CONFIG.color);
+
+        return {
+          phase, difficulty, countdownNum, timeLeft, score, wrongCount, streak, maxStreak,
+          userAnswer, currentQuestion, flashClass, showCorrectAnswer, correctAnswerValue,
+          isNewRecord, avgTime,
+          pressKey, pressDelete, submitAnswer, startCountdown, getHighScore, SoundEngine
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

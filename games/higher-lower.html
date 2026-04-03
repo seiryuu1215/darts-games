@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>どっちが高い？</title>
+  <link rel="stylesheet" href="../style.css">
+  <style>
+    .hl-container { display: flex; flex-direction: column; min-height: calc(100dvh - 60px); padding: 16px; }
+    .hl-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .cards-area { flex: 1; display: flex; gap: 16px; align-items: center; justify-content: center; padding: 16px 0; }
+    .hl-card { flex: 1; background: var(--surface); border-radius: var(--radius-lg); padding: 24px 16px; text-align: center; min-height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: transform 0.3s, box-shadow 0.3s; }
+    .hl-card.prev { border: 2px solid var(--surface3); }
+    .hl-card.next { border: 2px solid var(--theme-color); box-shadow: 0 0 20px rgba(var(--theme-color-rgb), 0.2); }
+    .hl-card-label { font-size: 14px; color: var(--text-muted); margin-bottom: 8px; }
+    .hl-card-throw { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+    .hl-card-score { font-size: 48px; font-weight: 900; }
+    .hl-card-hidden { font-size: 64px; }
+    .hl-card.correct-flash { animation: flash-green 0.5s ease; border-color: var(--correct); }
+    .hl-card.wrong-flash { animation: flash-red 0.5s ease; border-color: var(--wrong); }
+    .hl-buttons { display: flex; gap: 12px; padding-bottom: 16px; }
+    .hl-buttons .btn { flex: 1; font-size: 20px; }
+    .vs-badge { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: var(--theme-color); color: white; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; z-index: 5; }
+    .cards-wrapper { position: relative; display: flex; gap: 16px; width: 100%; }
+    .start-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80dvh; gap: 20px; padding: 20px; text-align: center; }
+  </style>
+</head>
+<body>
+  <script src="../store/config.js"></script>
+  <script src="../store/sounds.js"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+  <div id="app">
+    <div class="game-header">
+      <a href="../index.html" class="back-btn">←</a>
+      <h1>どっちが高い？</h1>
+    </div>
+
+    <!-- Start -->
+    <div v-if="phase === 'start'" class="start-screen">
+      <div style="font-size:64px;">⬆️</div>
+      <div style="font-size:24px; font-weight:800;">どっちが高い？</div>
+      <div class="text-muted">2つの投げを比較！1分タイムアタック</div>
+      <div v-if="highScore" class="badge badge-theme" style="font-size:14px; padding:8px 16px;">🏆 ハイスコア: {{ highScore }}</div>
+      <button class="btn btn-primary btn-lg" @click="startGame" style="max-width:280px;">スタート！</button>
+    </div>
+
+    <!-- Game -->
+    <div v-if="phase === 'playing'" class="hl-container">
+      <div class="hl-top">
+        <div class="timer-bar" style="flex:1; margin-right:16px;">
+          <div class="timer-bar-fill" :class="{ danger: timeLeft <= 10 }" :style="{ width: (timeLeft / 60 * 100) + '%' }"></div>
+        </div>
+        <div style="font-size:14px; color:var(--text-muted);">
+          <span style="font-size:24px; font-weight:800; color:var(--text);">{{ score }}</span> 正解
+        </div>
+      </div>
+
+      <div v-if="streak >= 2" class="streak text-center animate-bounce-in" style="margin-bottom:8px;">🔥 {{ streak }}連続</div>
+
+      <div style="flex:1; display:flex; align-items:center;">
+        <div class="cards-wrapper">
+          <div class="hl-card prev" :class="cardFlashClass">
+            <div class="hl-card-label">前の投げ</div>
+            <div class="hl-card-throw">{{ prevThrow.label }}</div>
+            <div class="hl-card-score">{{ prevThrow.score }}</div>
+            <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">点</div>
+          </div>
+          <div class="vs-badge">VS</div>
+          <div class="hl-card next" :class="cardFlashClass">
+            <div class="hl-card-label">次の投げ</div>
+            <div class="hl-card-throw">{{ nextThrow.label }}</div>
+            <div v-if="revealed" class="hl-card-score animate-bounce-in">{{ nextThrow.score }}</div>
+            <div v-else class="hl-card-hidden">？</div>
+            <div v-if="revealed" style="font-size:12px; color:var(--text-muted); margin-top:4px;">点</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hl-buttons">
+        <button class="btn" style="background:#3498db; color:white;" @click="guess('low')" :disabled="revealed">← LOW</button>
+        <button class="btn" style="background:#e74c3c; color:white;" @click="guess('high')" :disabled="revealed">HIGH →</button>
+      </div>
+    </div>
+
+    <!-- Result -->
+    <div v-if="phase === 'result'" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:80dvh; gap:24px; text-align:center; padding:20px;">
+      <div style="font-size:48px;">{{ isNewRecord ? '🏆' : score >= 20 ? '🎉' : '📊' }}</div>
+      <div v-if="isNewRecord" style="color:var(--warning); font-size:16px; font-weight:700;">🔥 NEW RECORD!</div>
+      <div style="font-size:72px; font-weight:800; background:linear-gradient(135deg, var(--theme-color), #fff); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;">{{ score }}</div>
+      <div class="result-stats" style="max-width:320px;">
+        <div class="result-stat">
+          <div class="result-stat-value" style="color:var(--wrong);">{{ misses }}</div>
+          <div class="result-stat-label">ミス</div>
+        </div>
+        <div class="result-stat">
+          <div class="result-stat-value">{{ totalAnswered > 0 ? Math.round(score / totalAnswered * 100) : 0 }}%</div>
+          <div class="result-stat-label">正答率</div>
+        </div>
+        <div class="result-stat">
+          <div class="result-stat-value" style="color:var(--warning);">🔥{{ bestStreak }}</div>
+          <div class="result-stat-label">最長連続</div>
+        </div>
+      </div>
+      <button class="btn btn-primary" @click="startGame" style="max-width:280px;">もう一度プレイ</button>
+      <a href="../index.html" class="btn btn-secondary" style="max-width:280px;">ゲーム一覧に戻る</a>
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, onMounted, onUnmounted } = Vue;
+
+    createApp({
+      setup() {
+        const ALL_THROWS = [];
+        for (let i = 1; i <= 20; i++) {
+          ALL_THROWS.push({ label: `S${i}`, score: i });
+          ALL_THROWS.push({ label: `D${i}`, score: i * 2 });
+          ALL_THROWS.push({ label: `T${i}`, score: i * 3 });
+        }
+        ALL_THROWS.push({ label: 'Bull（アウター）', score: 25 });
+        ALL_THROWS.push({ label: 'Bull（インナー）', score: 50 });
+
+        const phase = ref('start');
+        const prevThrow = ref({ label: '', score: 0 });
+        const nextThrow = ref({ label: '', score: 0 });
+        const revealed = ref(false);
+        const score = ref(0);
+        const misses = ref(0);
+        const streak = ref(0);
+        const bestStreak = ref(0);
+        const timeLeft = ref(60);
+        const cardFlashClass = ref('');
+        const isNewRecord = ref(false);
+        const totalAnswered = ref(0);
+        let timer = null;
+
+        const highScore = ref(parseInt(localStorage.getItem('darts-higher-lower-scores') || '0'));
+
+        function randomThrow() {
+          return ALL_THROWS[Math.floor(Math.random() * ALL_THROWS.length)];
+        }
+
+        function pickNewPair() {
+          prevThrow.value = nextThrow.value.label ? { ...nextThrow.value } : randomThrow();
+          let next;
+          do { next = randomThrow(); } while (next.label === prevThrow.value.label);
+          nextThrow.value = next;
+          revealed.value = false;
+          cardFlashClass.value = '';
+        }
+
+        function startGame() {
+          score.value = 0;
+          misses.value = 0;
+          streak.value = 0;
+          bestStreak.value = 0;
+          timeLeft.value = 60;
+          totalAnswered.value = 0;
+          isNewRecord.value = false;
+          prevThrow.value = randomThrow();
+          nextThrow.value = randomThrow();
+          while (nextThrow.value.label === prevThrow.value.label) nextThrow.value = randomThrow();
+          revealed.value = false;
+          phase.value = 'playing';
+          SoundEngine.tap();
+
+          timer = setInterval(() => {
+            timeLeft.value--;
+            if (timeLeft.value === 10) SoundEngine.countdown();
+            if (timeLeft.value <= 0) { clearInterval(timer); endGame(); }
+          }, 1000);
+        }
+
+        function guess(dir) {
+          if (revealed.value) return;
+          revealed.value = true;
+          totalAnswered.value++;
+
+          const diff = nextThrow.value.score - prevThrow.value.score;
+          const correct = diff === 0 || (dir === 'high' && diff > 0) || (dir === 'low' && diff < 0);
+
+          if (correct) {
+            score.value++;
+            streak.value++;
+            if (streak.value > bestStreak.value) bestStreak.value = streak.value;
+            cardFlashClass.value = 'correct-flash';
+            SoundEngine.correct();
+          } else {
+            misses.value++;
+            streak.value = 0;
+            cardFlashClass.value = 'wrong-flash';
+            SoundEngine.wrong();
+          }
+
+          setTimeout(() => {
+            pickNewPair();
+          }, 800);
+        }
+
+        function endGame() {
+          SoundEngine.timeup();
+          const prev = highScore.value;
+          if (score.value > prev) {
+            highScore.value = score.value;
+            localStorage.setItem('darts-higher-lower-scores', String(score.value));
+            isNewRecord.value = true;
+            SoundEngine.fanfare();
+          }
+          phase.value = 'result';
+        }
+
+        // Swipe support
+        let touchStartX = 0;
+        function onTouchStart(e) { touchStartX = e.touches[0].clientX; }
+        function onTouchEnd(e) {
+          if (phase.value !== 'playing' || revealed.value) return;
+          const diff = e.changedTouches[0].clientX - touchStartX;
+          if (Math.abs(diff) > 50) {
+            guess(diff > 0 ? 'high' : 'low');
+          }
+        }
+
+        onMounted(() => {
+          document.addEventListener('touchstart', onTouchStart, { passive: true });
+          document.addEventListener('touchend', onTouchEnd, { passive: true });
+        });
+        onUnmounted(() => {
+          document.removeEventListener('touchstart', onTouchStart);
+          document.removeEventListener('touchend', onTouchEnd);
+          clearInterval(timer);
+        });
+
+        document.documentElement.style.setProperty('--theme-color', STORE_CONFIG.color);
+
+        return {
+          phase, prevThrow, nextThrow, revealed, score, misses, streak, bestStreak,
+          timeLeft, cardFlashClass, highScore, isNewRecord, totalAnswered,
+          startGame, guess, SoundEngine
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

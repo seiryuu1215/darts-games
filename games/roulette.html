@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>罰ゲームルーレット</title>
+  <link rel="stylesheet" href="../style.css">
+  <style>
+    .player-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .player-row input { flex: 1; }
+    .player-row .score-input { width: 80px; text-align: center; }
+    .remove-btn { width: 40px; height: 48px; border: none; background: var(--surface3); color: var(--wrong); border-radius: var(--radius-sm); font-size: 20px; cursor: pointer; flex-shrink: 0; }
+    .wheel-container { position: relative; width: 300px; height: 300px; margin: 0 auto; }
+    .wheel-svg { width: 100%; height: 100%; transition: transform cubic-bezier(0.17, 0.67, 0.12, 0.99); }
+    .wheel-pointer { position: absolute; top: -10px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 14px solid transparent; border-right: 14px solid transparent; border-top: 28px solid var(--theme-color); z-index: 10; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); }
+    .ranking-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: var(--surface); border-radius: var(--radius-sm); margin-bottom: 6px; }
+    .ranking-item.loser { background: rgba(var(--wrong-rgb), 0.15); border: 1px solid var(--wrong); }
+    .ranking-rank { width: 28px; font-weight: 700; color: var(--text-muted); }
+    .ranking-name { flex: 1; font-weight: 600; }
+    .ranking-score { font-weight: 700; color: var(--theme-color); }
+    .loser-banner { text-align: center; padding: 16px; margin: 16px 0; background: linear-gradient(135deg, rgba(var(--wrong-rgb),0.2), rgba(var(--wrong-rgb),0.05)); border-radius: var(--radius); }
+    .loser-banner .name { font-size: 28px; font-weight: 800; color: var(--wrong); }
+    .result-icon { font-size: 64px; text-align: center; margin-bottom: 12px; }
+    .result-text { font-size: 28px; font-weight: 800; text-align: center; margin-bottom: 8px; }
+    .result-sub { font-size: 16px; color: var(--text-muted); text-align: center; margin-bottom: 16px; }
+    .confetti-piece { position: fixed; width: 10px; height: 10px; top: -10px; z-index: 999; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <script src="../store/config.js"></script>
+  <script src="../store/sounds.js"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+  <div id="app">
+    <div class="game-header">
+      <a href="../index.html" class="back-btn">←</a>
+      <h1>罰ゲームルーレット</h1>
+    </div>
+
+    <!-- Phase 1: Setup -->
+    <div v-if="phase === 'setup'" class="page-content">
+      <div class="card" style="padding:20px">
+        <div style="font-size:16px; font-weight:700; margin-bottom:12px;">プレイヤー登録</div>
+        <div v-for="(p, i) in players" :key="i" class="player-row">
+          <input class="input" v-model="p.name" :placeholder="'プレイヤー ' + (i+1)" @focus="SoundEngine.tap()">
+          <input class="input score-input" type="number" v-model.number="p.score" placeholder="点数" @focus="SoundEngine.tap()">
+          <button v-if="players.length > 2" class="remove-btn" @click="removePlayer(i)">×</button>
+        </div>
+        <button class="btn btn-secondary btn-sm mt-8" @click="addPlayer" style="font-size:14px">+ プレイヤー追加</button>
+      </div>
+      <button class="btn btn-primary btn-lg" @click="startGame" :disabled="!canStart">ランキング発表！</button>
+    </div>
+
+    <!-- Phase 2: Ranking + Spin -->
+    <div v-if="phase === 'ranking' || phase === 'spinning'" class="page-content">
+      <div v-if="phase === 'ranking'">
+        <div style="font-size:16px; font-weight:700; margin-bottom:12px; text-align:center;">スコアランキング</div>
+        <div v-for="(p, i) in sortedPlayers" :key="p.name" class="ranking-item" :class="{ loser: i === sortedPlayers.length - 1 }">
+          <div class="ranking-rank">{{ i + 1 }}.</div>
+          <div class="ranking-name">{{ p.name }}</div>
+          <div class="ranking-score">{{ p.score }}pt</div>
+        </div>
+        <div class="loser-banner animate-bounce-in">
+          <div style="font-size:14px; color:var(--text-muted);">最下位は…</div>
+          <div class="name">{{ loser.name }}</div>
+          <div style="font-size:14px; color:var(--text-muted); margin-top:4px;">ルーレットを回せ！</div>
+        </div>
+        <button class="btn btn-primary btn-lg" @click="phase = 'spinning'">ルーレットへ</button>
+      </div>
+
+      <div v-if="phase === 'spinning'" style="text-align:center;">
+        <div style="font-size:16px; margin-bottom:16px;"><span style="font-weight:700; color:var(--wrong);">{{ loser.name }}</span> の運命は…</div>
+        <div class="wheel-container">
+          <div class="wheel-pointer"></div>
+          <svg class="wheel-svg" :style="wheelStyle" viewBox="0 0 300 300">
+            <g v-for="(seg, i) in segments" :key="i">
+              <path :d="segmentPath(i)" :fill="seg.color" stroke="#111" stroke-width="1.5"/>
+              <text :transform="segmentTextTransform(i)" text-anchor="middle" fill="white" font-size="13" font-weight="700" dominant-baseline="middle">{{ seg.label }}</text>
+            </g>
+            <circle cx="150" cy="150" r="30" fill="#1a1a1a" stroke="#333" stroke-width="2"/>
+            <text x="150" y="150" text-anchor="middle" dominant-baseline="middle" fill="white" font-size="11" font-weight="700">SPIN</text>
+          </svg>
+        </div>
+        <button class="btn btn-primary btn-lg mt-16" @click="spin" :disabled="isSpinning" style="font-size:24px;">
+          {{ isSpinning ? '回転中…' : 'SPIN!' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Result Bottom Sheet -->
+    <div class="bottom-sheet-overlay" :class="{ active: phase === 'result' }" @click="resetGame"></div>
+    <div class="bottom-sheet" :class="{ active: phase === 'result' }">
+      <div class="bottom-sheet-handle"></div>
+      <div class="result-icon">{{ resultSegment?.icon }}</div>
+      <div class="result-text" :style="{ color: resultSegment?.color }">{{ resultSegment?.label }}</div>
+      <div class="result-sub">{{ resultSegment?.description }}</div>
+      <div class="trivia-card" v-if="currentTrivia" style="margin-bottom:20px;">{{ currentTrivia }}</div>
+      <button class="btn btn-primary" @click="resetGame">もう一度プレイ</button>
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, computed, nextTick } = Vue;
+
+    createApp({
+      setup() {
+        const SEGMENTS = [
+          { label: 'セーフ', color: '#27ae60', icon: '😊', description: 'セーフ！今回は許してやろう！', weight: 3 },
+          { label: '1杯', color: '#3498db', icon: '🍺', description: '1杯飲め！カンパーイ！', weight: 3 },
+          { label: '2杯', color: '#f39c12', icon: '🍻', description: '2杯飲め！イッキ！イッキ！', weight: 2 },
+          { label: '罰ゲーム', color: '#e74c3c', icon: '😈', description: 'みんなで罰ゲームを決めろ！', weight: 2 },
+          { label: '大罰ゲーム', color: '#9b59b6', icon: '💀', description: '大罰ゲーム！容赦なし！', weight: 1 },
+          { label: '特大罰', color: '#c0392b', icon: '☠️', description: '特大罰ゲーム！全力でやれ！', weight: 0.5 },
+        ];
+
+        const TRIVIA = [
+          "「ハットトリック」は1ラウンド3投すべてブルに入れること",
+          "501の名前の由来は「501点からちょうど0にする」ゲームから",
+          "ダーツボードの数字配列は1896年にブライアン・ギャムリンが考案",
+          "プロの試合では1投あたり約9秒以内に投げなければならない",
+          "ダーツの最高得点は1ラウンド180点（T20×3）",
+          "「シャンハイ」は同じ数字のシングル・ダブル・トリプルを全て打つこと",
+          "ソフトダーツの的までの距離は244cm",
+          "ブルの高さは床から173cm",
+          "世界最大のダーツ大会はPDCワールドチャンピオンシップ",
+          "ダーツの起源は中世イングランドの兵士の暇つぶし",
+          "「トン」は1ラウンド100点以上のスコアのこと",
+          "ダーツボードはアフリカ産サイザル麻で作られている",
+          "9ダーツフィニッシュは501を最少の9投で上がること",
+          "フィル・テイラーは世界選手権を16回制覇した伝説のプレイヤー",
+          "ダーツは2005年にスポーツとして公式認定された",
+          "クリケットでは15〜20とブルを使ってゲームを進める",
+          "「アレンジ」とは残り点数からの上がり方の計画のこと",
+        ];
+
+        const players = ref([{ name: '', score: 0 }, { name: '', score: 0 }]);
+        const phase = ref('setup');
+        const isSpinning = ref(false);
+        const wheelRotation = ref(0);
+        const resultSegment = ref(null);
+        const currentTrivia = ref('');
+
+        const segments = SEGMENTS;
+
+        const canStart = computed(() => {
+          return players.value.length >= 2 && players.value.every(p => p.name.trim() && typeof p.score === 'number');
+        });
+
+        const sortedPlayers = computed(() => {
+          return [...players.value].sort((a, b) => b.score - a.score);
+        });
+
+        const loser = computed(() => {
+          return sortedPlayers.value[sortedPlayers.value.length - 1] || { name: '?' };
+        });
+
+        function addPlayer() {
+          players.value.push({ name: '', score: 0 });
+          SoundEngine.tap();
+        }
+
+        function removePlayer(i) {
+          players.value.splice(i, 1);
+          SoundEngine.tap();
+        }
+
+        function startGame() {
+          players.value.forEach((p, i) => { if (!p.name.trim()) p.name = 'Player ' + (i + 1); });
+          phase.value = 'ranking';
+          SoundEngine.result();
+        }
+
+        function segmentPath(i) {
+          const total = segments.length;
+          const angle = (2 * Math.PI) / total;
+          const startAngle = i * angle - Math.PI / 2;
+          const endAngle = startAngle + angle;
+          const cx = 150, cy = 150, r = 140;
+          const x1 = cx + r * Math.cos(startAngle);
+          const y1 = cy + r * Math.sin(startAngle);
+          const x2 = cx + r * Math.cos(endAngle);
+          const y2 = cy + r * Math.sin(endAngle);
+          return `M${cx},${cy} L${x1},${y1} A${r},${r} 0 0,1 ${x2},${y2} Z`;
+        }
+
+        function segmentTextTransform(i) {
+          const total = segments.length;
+          const angle = (2 * Math.PI) / total;
+          const midAngle = i * angle + angle / 2 - Math.PI / 2;
+          const cx = 150, cy = 150, r = 90;
+          const x = cx + r * Math.cos(midAngle);
+          const y = cy + r * Math.sin(midAngle);
+          const deg = (midAngle * 180) / Math.PI;
+          return `translate(${x},${y}) rotate(${deg})`;
+        }
+
+        const wheelStyle = computed(() => ({
+          transform: `rotate(${wheelRotation.value}deg)`,
+          transitionDuration: isSpinning.value ? '3s' : '0s',
+        }));
+
+        function spin() {
+          if (isSpinning.value) return;
+          isSpinning.value = true;
+
+          // Weighted random selection based on score difference
+          const maxScore = Math.max(...players.value.map(p => p.score));
+          const minScore = Math.min(...players.value.map(p => p.score));
+          const diff = maxScore - minScore;
+          const harshBoost = Math.min(diff / 100, 2);
+
+          const weights = segments.map((s, i) => {
+            let w = s.weight;
+            if (i >= 3) w += harshBoost;
+            if (i === 0) w = Math.max(0.5, w - harshBoost * 0.5);
+            return w;
+          });
+
+          const totalWeight = weights.reduce((a, b) => a + b, 0);
+          let rand = Math.random() * totalWeight;
+          let selectedIndex = 0;
+          for (let i = 0; i < weights.length; i++) {
+            rand -= weights[i];
+            if (rand <= 0) { selectedIndex = i; break; }
+          }
+
+          const segAngle = 360 / segments.length;
+          const targetAngle = 360 - (selectedIndex * segAngle + segAngle / 2);
+          const extraSpins = 5 + Math.floor(Math.random() * 3);
+          const finalRotation = wheelRotation.value + extraSpins * 360 + targetAngle + (Math.random() * segAngle * 0.6 - segAngle * 0.3);
+
+          wheelRotation.value = finalRotation;
+
+          // Spin sound
+          let spinCount = 0;
+          const spinInterval = setInterval(() => {
+            SoundEngine.spin();
+            spinCount++;
+            if (spinCount > 12) clearInterval(spinInterval);
+          }, 200);
+
+          setTimeout(() => {
+            clearInterval(spinInterval);
+            isSpinning.value = false;
+            resultSegment.value = segments[selectedIndex];
+            currentTrivia.value = TRIVIA[Math.floor(Math.random() * TRIVIA.length)];
+            phase.value = 'result';
+            SoundEngine.result();
+            SoundEngine.voice('voice_punishment');
+            createConfetti();
+          }, 3200);
+        }
+
+        function createConfetti() {
+          const colors = ['#e74c3c','#3498db','#f39c12','#27ae60','#9b59b6','#e91e63','#00bcd4'];
+          for (let i = 0; i < 50; i++) {
+            const el = document.createElement('div');
+            el.className = 'confetti-piece';
+            el.style.left = Math.random() * 100 + 'vw';
+            el.style.background = colors[Math.floor(Math.random() * colors.length)];
+            el.style.width = (Math.random() * 8 + 6) + 'px';
+            el.style.height = (Math.random() * 8 + 6) + 'px';
+            el.style.borderRadius = Math.random() > 0.5 ? '50%' : '2px';
+            el.style.animationDuration = (Math.random() * 2 + 1.5) + 's';
+            el.style.animationDelay = (Math.random() * 0.5) + 's';
+            el.style.animation = `confetti-fall ${Math.random() * 2 + 1.5}s ease-in ${Math.random() * 0.5}s forwards`;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 4000);
+          }
+        }
+
+        function resetGame() {
+          phase.value = 'setup';
+          wheelRotation.value = 0;
+          resultSegment.value = null;
+        }
+
+        // Theme
+        document.documentElement.style.setProperty('--theme-color', STORE_CONFIG.color);
+
+        return {
+          players, phase, isSpinning, segments, wheelStyle, resultSegment, currentTrivia,
+          canStart, sortedPlayers, loser,
+          addPlayer, removePlayer, startGame, spin, resetGame,
+          segmentPath, segmentTextTransform, SoundEngine
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

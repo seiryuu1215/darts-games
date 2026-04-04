@@ -271,8 +271,15 @@
 
         function resetGame() {
           phase.value = 'setup';
+          // 回転リセット時にアニメーションを無効化
+          const wheel = document.querySelector('.roulette-wheel');
+          if (wheel) wheel.style.transition = 'none';
           wheelRotation.value = 0;
           resultSegment.value = null;
+          // 次フレームでtransitionを戻す
+          requestAnimationFrame(() => {
+            if (wheel) wheel.style.transition = '';
+          });
         }
 
         // Theme

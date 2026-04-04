@@ -235,7 +235,10 @@
           if (mode.value === 'daily') {
             phase.value = 'start';
           } else {
-            const idx = Math.floor(Math.random() * PUZZLES.length);
+            // 同じ問題の連続を防止
+            const currentIdx = PUZZLES.indexOf(currentPuzzle.value);
+            let idx;
+            do { idx = Math.floor(Math.random() * PUZZLES.length); } while (idx === currentIdx && PUZZLES.length > 1);
             currentPuzzle.value = PUZZLES[idx];
             clearSlots();
           }

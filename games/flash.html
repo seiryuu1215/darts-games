@@ -68,8 +68,8 @@
         <button v-for="(c, i) in shuffledChoices" :key="i"
           class="choice-btn"
           :class="{
-            'correct-answer': answered && c === currentQ.correct,
-            'wrong-answer': answered && c !== currentQ.correct
+            'correct-answer': answered && isCorrectChoice(c),
+            'wrong-answer': answered && !isCorrectChoice(c)
           }"
           :disabled="answered"
           @click="selectChoice(c)"
@@ -79,8 +79,8 @@
       </div>
 
       <div v-if="answered" class="explanation">
-        <div class="correct-label">正解: {{ currentQ.correct }}</div>
-        <div class="text-sm text-muted">残り{{ currentQ.remain }}点 → {{ currentQ.correct }}で上がり</div>
+        <div class="correct-label">正解: {{ displayCorrect }}</div>
+        <div class="text-sm text-muted">残り{{ currentQ.remain }}点 → {{ displayCorrect }}で上がり</div>
         <button class="btn btn-primary mt-16" @click="nextQuestion">
           {{ currentIndex < sessionQuestions.length - 1 ? '次へ' : '結果を見る' }}
         </button>
@@ -134,39 +134,41 @@
 
     createApp({
       setup() {
+        // correct = ベストアウト（複数可: 配列対応）
+        // wrong = 合計が一致しない、またはフィニッシュとして成立しない選択肢
         const ARRANGE_DATA = [
-          { remain: 2, correct: "D1", wrong: ["S2", "S1", "T1"] },
-          { remain: 4, correct: "D2", wrong: ["S4", "S2→D1", "T1"] },
-          { remain: 8, correct: "D4", wrong: ["S8", "D2→D1", "S4→D2"] },
-          { remain: 10, correct: "D5", wrong: ["S10", "D3→D2", "S5→D2"] },
-          { remain: 16, correct: "D8", wrong: ["S16", "D4→D2", "T5→S1"] },
-          { remain: 20, correct: "D10", wrong: ["S20", "D5→D5", "T7→S1"] },
-          { remain: 24, correct: "D12", wrong: ["S20→D2", "T8", "D10→D2"] },
-          { remain: 26, correct: "D13", wrong: ["S20→D3", "T9→S1", "S6→D10"] },
-          { remain: 28, correct: "D14", wrong: ["S20→D4", "T9→S1", "D10→D4"] },
-          { remain: 30, correct: "D15", wrong: ["S20→D5", "T10", "D10→D5"] },
-          { remain: 32, correct: "D16", wrong: ["S20→D6", "T10→D1", "D8→D8"] },
-          { remain: 34, correct: "D17", wrong: ["S20→D7", "T11→S1", "D10→D7"] },
-          { remain: 36, correct: "D18", wrong: ["S20→D8", "T12", "D10→D8"] },
-          { remain: 38, correct: "D19", wrong: ["S20→D9", "T12→D1", "D10→D9"] },
-          { remain: 40, correct: "D20", wrong: ["S20→D10", "T13→S1", "D18→D2"] },
-          { remain: 50, correct: "Bull", wrong: ["S20→D15", "D20→D5", "T17→S1"] },
-          { remain: 60, correct: "S20→D20", wrong: ["T20", "D20→D10", "S10→Bull"] },
-          { remain: 61, correct: "T15→D8", wrong: ["S20→D20", "T11→D14", "T20→S1"] },
-          { remain: 70, correct: "T10→D20", wrong: ["T20→D5", "S20→Bull", "T14→D14"] },
-          { remain: 80, correct: "T20→D10", wrong: ["T16→D14", "D20→D20", "T20→S20"] },
-          { remain: 81, correct: "T19→D12", wrong: ["T15→D18", "T20→D10", "T20→S1→D10"] },
-          { remain: 90, correct: "T18→D18", wrong: ["T20→D15", "T20→S30", "Bull→D20"] },
-          { remain: 95, correct: "T19→D19", wrong: ["T20→D17", "Bull→T15", "T15→Bull"] },
-          { remain: 100, correct: "T20→D20", wrong: ["T20→S20→D10", "Bull→Bull", "D20→T20"] },
-          { remain: 101, correct: "T17→Bull", wrong: ["T20→D20", "T19→D22", "T20→S1→D20"] },
-          { remain: 110, correct: "T20→Bull", wrong: ["T20→S20→D15", "T18→D28", "T20→D25"] },
-          { remain: 120, correct: "T20→S20→D20", wrong: ["T20→T20", "T20→Bull→D5", "T19→S13→D20"] },
-          { remain: 130, correct: "T20→T10→D20", wrong: ["T20→Bull→D15", "T19→T13→D20", "T20→S20→Bull"] },
-          { remain: 140, correct: "T20→T20→D10", wrong: ["T20→T18→D4", "T20→Bull→D20", "T19→T19→D12"] },
-          { remain: 150, correct: "T20→T18→D18", wrong: ["T20→T20→D15", "T20→Bull→D20", "T19→T19→D18"] },
-          { remain: 160, correct: "T20→T20→D20", wrong: ["T20→T18→D22", "T20→Bull→T20", "T19→T19→D22"] },
-          { remain: 170, correct: "T20→T20→Bull", wrong: ["T20→T19→Bull", "T19→T19→D28", "T20→T18→D28"] },
+          { remain: 2, correct: ["D1"], wrong: ["S2", "S1", "T1"] },
+          { remain: 4, correct: ["D2"], wrong: ["S4", "S2→S2", "T1"] },
+          { remain: 8, correct: ["D4"], wrong: ["S8", "S3→S3", "S6→S1"] },
+          { remain: 10, correct: ["D5"], wrong: ["S10", "S6→S3", "S7→S2"] },
+          { remain: 16, correct: ["D8"], wrong: ["S16", "S10→S4", "T5"] },
+          { remain: 20, correct: ["D10"], wrong: ["S20", "S12→S6", "T7"] },
+          { remain: 24, correct: ["D12"], wrong: ["S20→S3", "T8", "S18→S4"] },
+          { remain: 26, correct: ["D13"], wrong: ["S20→S5", "T9", "S18→S6"] },
+          { remain: 28, correct: ["D14"], wrong: ["S20→S7", "T9→S1", "S18→S8"] },
+          { remain: 30, correct: ["D15"], wrong: ["S20→S9", "T10", "S18→S10"] },
+          { remain: 32, correct: ["D16"], wrong: ["S20→S11", "T10→S2", "S16→S15"] },
+          { remain: 34, correct: ["D17"], wrong: ["S20→S13", "T11→S1", "S18→S15"] },
+          { remain: 36, correct: ["D18"], wrong: ["S20→S15", "T12", "S16→S19"] },
+          { remain: 38, correct: ["D19"], wrong: ["S20→S17", "T12→S2", "S18→S19"] },
+          { remain: 40, correct: ["D20"], wrong: ["S20→S19", "T13→S1", "S18→T7"] },
+          { remain: 50, correct: ["Bull"], wrong: ["S20→S19→S10", "D20→S9", "T17"] },
+          { remain: 60, correct: ["S20→D20"], wrong: ["T20", "S18→S20→S20", "S15→S20→S23"] },
+          { remain: 61, correct: ["T15→D8"], wrong: ["S20→T13", "T11→S15→S13", "T20→S2"] },
+          { remain: 70, correct: ["T10→D20"], wrong: ["T20→S9", "S20→S18→S18→S13", "T14→S15→S12"] },
+          { remain: 80, correct: ["T20→D10"], wrong: ["T16→S15→S12", "S20→T19", "T20→S19"] },
+          { remain: 81, correct: ["T19→D12"], wrong: ["T15→S17→S12", "T20→S20", "T17→S15→S12"] },
+          { remain: 90, correct: ["T18→D18"], wrong: ["T20→S18→S11", "T20→S29", "T19→S20→S12"] },
+          { remain: 95, correct: ["T19→D19"], wrong: ["T20→S22→S12", "T15→S19→S20", "T17→S20→S15"] },
+          { remain: 100, correct: ["T20→D20"], wrong: ["T20→S19→S20", "T18→S20→S15", "T19→S18→S20"] },
+          { remain: 101, correct: ["T17→Bull"], wrong: ["T20→S20→S20", "T19→S15→S20", "T20→S18→S22"] },
+          { remain: 110, correct: ["T20→Bull"], wrong: ["T20→S20→S29", "T18→S20→S15→S12", "T19→S20→S18→S12"] },
+          { remain: 120, correct: ["T20→S20→D20", "T20→T20（マスターアウト）"], wrong: ["T20→S18→S20→S20", "T19→T19→S5", "T18→S20→S20→S20"] },
+          { remain: 130, correct: ["T20→T10→D20"], wrong: ["T20→S20→S18→S20→S11", "T19→T13→S20→S15", "T20→S20→T19"] },
+          { remain: 140, correct: ["T20→T20→D10"], wrong: ["T20→T18→S5→S12", "T20→S20→T19→S18", "T19→T19→S15→S12"] },
+          { remain: 150, correct: ["T20→T18→D18"], wrong: ["T20→T20→S29", "T20→S20→T19→S18→S12", "T19→T19→S20→S15→S12"] },
+          { remain: 160, correct: ["T20→T20→D20"], wrong: ["T20→T18→S20→S22", "T19→T19→S20→S22", "T20→T19→S20→S20"] },
+          { remain: 170, correct: ["T20→T20→Bull"], wrong: ["T20→T19→S18→S20", "T19→T19→S20→S22→S12", "T18→T20→S20→S20→S11"] },
         ];
 
         const phase = ref('start');
@@ -264,7 +266,8 @@
         function updateChoices() {
           const q = sessionQuestions.value[currentIndex.value];
           if (!q) return;
-          const all = [q.correct, ...q.wrong];
+          const correctArr = Array.isArray(q.correct) ? q.correct : [q.correct];
+          const all = [correctArr[0], ...q.wrong];
           shuffledChoices.value = shuffle(all);
         }
 
@@ -272,10 +275,11 @@
           if (answered.value) return;
           answered.value = true;
           const q = currentQ.value;
+          const correctArr = Array.isArray(q.correct) ? q.correct : [q.correct];
           const stats = loadStats();
           if (!stats[q.remain]) stats[q.remain] = { c: 0, w: 0 };
 
-          if (c === q.correct) {
+          if (correctArr.includes(c)) {
             lastCorrect.value = true;
             correctCount.value++;
             stats[q.remain].c++;
@@ -316,10 +320,20 @@
 
         document.documentElement.style.setProperty('--theme-color', STORE_CONFIG.color);
 
+        function isCorrectChoice(c) {
+          const correctArr = Array.isArray(currentQ.value.correct) ? currentQ.value.correct : [currentQ.value.correct];
+          return correctArr.includes(c);
+        }
+
+        const displayCorrect = computed(() => {
+          const correctArr = Array.isArray(currentQ.value.correct) ? currentQ.value.correct : [currentQ.value.correct];
+          return correctArr.join(' または ');
+        });
+
         return {
           phase, sessionQuestions, currentIndex, currentQ, answered, lastCorrect,
           correctCount, shuffledChoices, streakDays, overallAccuracy, weakList, weakCount,
-          startSession, selectChoice, nextQuestion, SoundEngine
+          startSession, selectChoice, nextQuestion, isCorrectChoice, displayCorrect, SoundEngine
         };
       }
     }).mount('#app');

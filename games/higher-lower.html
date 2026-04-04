@@ -210,14 +210,20 @@
           phase.value = 'result';
         }
 
-        // Swipe support
+        // Swipe support（垂直スクロールとの誤爆防止）
         let touchStartX = 0;
-        function onTouchStart(e) { touchStartX = e.touches[0].clientX; }
+        let touchStartY = 0;
+        function onTouchStart(e) {
+          touchStartX = e.touches[0].clientX;
+          touchStartY = e.touches[0].clientY;
+        }
         function onTouchEnd(e) {
           if (phase.value !== 'playing' || revealed.value) return;
-          const diff = e.changedTouches[0].clientX - touchStartX;
-          if (Math.abs(diff) > 50) {
-            guess(diff > 0 ? 'high' : 'low');
+          const diffX = e.changedTouches[0].clientX - touchStartX;
+          const diffY = e.changedTouches[0].clientY - touchStartY;
+          // 水平方向の移動が垂直方向の2倍以上の場合のみスワイプ判定
+          if (Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY) * 2) {
+            guess(diffX > 0 ? 'high' : 'low');
           }
         }
 

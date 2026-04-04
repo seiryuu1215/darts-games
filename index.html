@@ -12,7 +12,7 @@
     .top-header { text-align: center; padding: 32px 16px 24px; }
     .top-header p { color: var(--text-muted); font-size: 14px; margin-top: 8px; }
     .sound-toggle { position: fixed; top: env(safe-area-inset-top, 12px); right: 12px; z-index: 50;
-      background: var(--surface2); border: none; color: var(--text); width: 40px; height: 40px;
+      background: var(--surface2); border: none; color: var(--text); width: 48px; height: 48px;
       border-radius: 50%; font-size: 20px; cursor: pointer; margin-top: 12px; }
   </style>
 </head>
@@ -120,6 +120,14 @@
         function toggleSound() {
           soundOn.value = !soundOn.value;
           STORE_CONFIG.sounds.enabled = soundOn.value;
+          sessionStorage.setItem('darts-sound', soundOn.value ? 'on' : 'off');
+        }
+
+        // サウンド状態復元
+        const savedSound = sessionStorage.getItem('darts-sound');
+        if (savedSound === 'off') {
+          soundOn.value = false;
+          STORE_CONFIG.sounds.enabled = false;
         }
 
         onMounted(() => {
@@ -128,16 +136,23 @@
           }
         });
 
-        const games = [
+        const allGames = [
           { id: 'roulette', icon: '🎰', title: '罰ゲームルーレット', desc: '最下位がルーレットを回す！', url: 'games/roulette.html', bg: 'linear-gradient(135deg, #e74c3c, #c0392b)' },
           { id: 'quiz', icon: '❓', title: 'ダーツ豆知識クイズ', desc: 'Kahoot風4択クイズ', url: 'games/quiz.html', bg: 'linear-gradient(135deg, #9b59b6, #8e44ad)' },
           { id: 'sprint', icon: '⚡', title: '暗算スプリント', desc: '1分間スコア計算タイムアタック', url: 'games/sprint.html', bg: 'linear-gradient(135deg, #f39c12, #e67e22)' },
           { id: 'memory', icon: '🃏', title: 'アレンジ神経衰弱', desc: '残り点数とアウトをマッチ', url: 'games/memory.html', bg: 'linear-gradient(135deg, #27ae60, #229954)' },
-          { id: 'higher-lower', icon: '⬆️', title: 'どっちが高い？', desc: 'スコア比較1分タイムアタック', url: 'games/higher-lower.html', bg: 'linear-gradient(135deg, #3498db, #2980b9)' },
+          { id: 'higherLower', icon: '⬆️', title: 'どっちが高い？', desc: 'スコア比較1分タイムアタック', url: 'games/higher-lower.html', bg: 'linear-gradient(135deg, #3498db, #2980b9)' },
           { id: 'puzzle', icon: '🎯', title: '的狙いパズル', desc: '3投でちょうどX点を作れ', url: 'games/puzzle.html', bg: 'linear-gradient(135deg, #1abc9c, #16a085)' },
           { id: 'flash', icon: '📚', title: 'アレンジフラッシュ', desc: 'Duolingo風フラッシュカード', url: 'games/flash.html', bg: 'linear-gradient(135deg, #e91e63, #c2185b)' },
-          { id: 'board-quiz', icon: '🔢', title: 'ボード配置クイズ', desc: '隣の数字は何？初心者OK', url: 'games/board-quiz.html', bg: 'linear-gradient(135deg, #00bcd4, #0097a7)' },
+          { id: 'boardQuiz', icon: '🔢', title: 'ボード配置クイズ', desc: '隣の数字は何？初心者OK', url: 'games/board-quiz.html', bg: 'linear-gradient(135deg, #00bcd4, #0097a7)' },
         ];
+
+        // config.gamesでフィルタリング + customGamesを追加
+        const gameConfig = config.games || {};
+        const games = allGames.filter(g => gameConfig[g.id] !== false)
+          .concat((config.customGames || []).map(cg => ({
+            id: cg.id, icon: cg.icon, title: cg.title, desc: cg.desc, url: cg.url, bg: cg.bg
+          })));
 
         return { config, password, authenticated, pwError, pwInput, games, checkPassword, unlockAudio, soundOn, toggleSound, SoundEngine };
       }
